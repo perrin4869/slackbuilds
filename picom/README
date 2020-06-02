@@ -1,0 +1,6 @@
+picom is a compositor for X. It is a fork of compton, which has
+become unmaintained. Since it was forked, picom has gone through
+significant changes, therefore adopting a new name.
+
+This package is not compatible with the compton package in
+SlackBuilds.
