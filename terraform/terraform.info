@@ -1,7 +1,7 @@
 PRGNAM="terraform"
 VERSION="0.12.19"
 HOMEPAGE="https://www.terraform.io/"
-DOWNLOAD="https://github.com/hashicorp/terraform/archive/v0.12.19.tar.gz"
+DOWNLOAD="https://github.com/hashicorp/terraform/archive/v0.12.19/terraform-0.12.19.tar.gz"
 MD5SUM="3021fe6320888cac155a19e2a1d08bcb"
 DOWNLOAD_x86_64=""
 MD5SUM_x86_64=""

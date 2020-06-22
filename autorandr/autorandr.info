@@ -1,7 +1,7 @@
 PRGNAM="autorandr"
 VERSION="1.10.1"
 HOMEPAGE="https://github.com/phillipberndt/autorandr"
-DOWNLOAD="https://github.com/phillipberndt/autorandr/archive/1.10.1.tar.gz"
+DOWNLOAD="https://github.com/phillipberndt/autorandr/archive/1.10.1/autorandr-1.10.1.tar.gz"
 MD5SUM="7155aae15fd6b2cddaff43b6103a4412"
 DOWNLOAD_x86_64=""
 MD5SUM_x86_64=""
