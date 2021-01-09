@@ -66,6 +66,7 @@ mkdir -p $TMP $PKG $OUTPUT
 cd $TMP
 rm -rf $PRGNAM-$VERSION
 tar xvf $CWD/i3-$VERSION.tar.gz
+patch -p0 < $CWD/i3-gaps.patch
 cd i3-$VERSION
 chown -R root:root .
 find -L . \
