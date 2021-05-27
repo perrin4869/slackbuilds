@@ -6,7 +6,7 @@
 # customary to leave one space after the ':' except on otherwise blank lines.
 
         |-----handy-ruler------------------------------------------------------|
-pass-otp: pass-otp
+pass-otp: pass-otp (Manage OTP tokens)
 pass-otp:
 pass-otp: A pass extension for managing one-time-password (OTP) tokens.
 pass-otp:
