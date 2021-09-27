@@ -23,7 +23,7 @@
 #  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 PRGNAM=terraform
-VERSION=${VERSION:-0.12.19}
+VERSION=${VERSION:-1.0.7}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 XC_OS=linux
@@ -70,19 +70,16 @@ mkdir -p $GOPATH
 
 PATH=$PATH:$GOPATH/bin \
 GOPATH=$GOPATH \
-make test
-
-PATH=$PATH:$GOPATH/bin \
-GOPATH=$GOPATH \
 XC_ARCH=$XC_ARCH \
 XC_OS=$XC_OS \
-make bin
+TF_RELEASE=1 \
+./scripts/build.sh
 
 install -D -m 0755 bin/terraform $PKG/usr/bin/terraform
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cp -a \
-  CHANGELOG.md LICENSE README.md CODEOWNERS examples \
+  CHANGELOG.md LICENSE README.md CODEOWNERS docs \
   $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 
