@@ -22,7 +22,7 @@
 # not, see <http://www.gnu.org/licenses/>.
 
 PRGNAM="picom"
-VERSION=${VERSION:-8.2}
+VERSION=${VERSION:-9}
 BUILD=${BUILD:-1}
 TAG=${TAG:-_SBo}
 
