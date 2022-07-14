@@ -82,6 +82,7 @@ cd build
   meson .. \
     --buildtype=release \
     --prefix=/usr \
+    --strip=true \
     -Doffline=false
   "${NINJA:=ninja}"
   DESTDIR=$PKG $NINJA install
