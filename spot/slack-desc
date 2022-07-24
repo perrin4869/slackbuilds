@@ -6,7 +6,7 @@
 # customary to leave one space after the ':' except on otherwise blank lines.
 
     |-----handy-ruler------------------------------------------------------|
-spot: spot
+spot: spot (spotify player)
 spot:
 spot: Gtk/Rust native Spotify client for the GNOME desktop.
 spot: Only works with premium accounts!
