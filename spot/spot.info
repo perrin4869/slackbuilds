@@ -349,7 +349,7 @@ DOWNLOAD="https://github.com/xou816/spot/archive/refs/tags/0.3.3/spot-0.3.3.tar.
           https://crates-io.s3-us-west-1.amazonaws.com/crates/zvariant_derive/zvariant_derive-2.10.0.crate \
           https://crates-io.s3-us-west-1.amazonaws.com/crates/zvariant_derive/zvariant_derive-3.1.2.crate"
 MD5SUM="1ab5f9d3e76d2e99691c6337c2657d7e \
-        1ab5f9d3e76d2e99691c6337c2657d7e \
+        9d033cc2daa6924420a4a89e6705773f \
         bd53a9f0ec43690f84e8c96bba8e538d \
         db6f9a586bda62de931be1b2bce9cd34 \
         b14b12cd0e866930de1993132c85705b \
