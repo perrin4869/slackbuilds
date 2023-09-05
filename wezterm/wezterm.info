@@ -6,6 +6,10 @@ DOWNLOAD="https://github.com/wez/wezterm/archive/refs/tags/20230712-072601-f4abf
           https://github.com/madler/zlib/archive/refs/tags/v1.2.11/zlib-1.2.11.tar.gz \
           https://github.com/glennrp/libpng/archive/8439534daa1d3a5705ba92e653eda9251246dd61/libpng-8439534daa1d3a5705ba92e653eda9251246dd61.tar.gz \
           https://github.com/wez/freetype2/archive/e4586d960f339cf75e2e0b34aee30a0ed8353c0d/freetype2-2.13.1.tar.gz \
+          https://github.com/image-rs/image/archive/fe069785ae245a2c510fd724ef96da283b05a236/image-fe06978.tar.gz \
+          https://github.com/rust-x-bindings/rust-xcb/archive/dbdaa01c178c6fbe68bd51b7ad44c08172181083/rust-xcb-41cc7e93ef1d12da.tar.gz \
+          https://github.com/wez/xcb-imdkit-rs/archive/e59e4a6df065b702e0c22fa2dcea00bd8301a446/xcb-imdkit-rs-1f85ad932c246e33.tar.gz \
+          https://github.com/fcitx/xcb-imdkit/archive/30e2f16f9a8b0e338e25ce5e3643809a07ad41f0/xcb-imdkit-30e2f16.tar.gz \
           https://static.crates.io/crates/addr2line/addr2line-0.20.0.crate \
           https://static.crates.io/crates/adler/adler-1.0.2.crate \
           https://static.crates.io/crates/adler32/adler32-1.2.0.crate \
@@ -605,6 +609,10 @@ MD5SUM="7d4639c52e350c95c9499fa0492e432d \
         0095d2d2d1f3442ce1318336637b695f \
         be0fd7ed978023dbc6dfb0485ed7ae64 \
         02e40b0f03633461d521d90bbd4d622e \
+        691cb3ee7b20f0e6ac61100cbdaca942 \
+        7afbec1a94679a48be69871de6cb6934 \
+        11621cd2f0d62ff21aa07d093d0323d5 \
+        f5ad6d69842265a1becc4eb3efb7ec77 \
         77f7d0562b10dd33e0f61705427d3214 \
         669215548c64019c08c92b2c1afd3deb \
         d5898ddb1e496ff0ac50b79829311e76 \
