@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Slackware build script for spot
+# Slackware build script for wezterm
 
 # Copyright 2022 Julian Grinblat <julian@dotcore.co.il>
 # All rights reserved.
