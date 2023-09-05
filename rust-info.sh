@@ -3,7 +3,7 @@
 # Automatic $PRGNAM.info generator for Rust software. Use this script for
 # software that supports both x86-64 and x86 architecture.
 
-# Copyright 2022 K. Eugene Carlson  Tsukuba, Japan 
+# Copyright 2022 K. Eugene Carlson  Tsukuba, Japan
 # All rights reserved.
 #
 # Redistribution and use of this script, with or without modification, is
@@ -44,7 +44,8 @@ PRGDIR=${PRGDIR:-$PRGNAM-$VERSION}
 URL=${URL:-}
 
 # Rust crates come from here
-WEBADDR="https://crates-io.s3-us-west-1.amazonaws.com/crates/"
+WEBADDR="https://static.crates.io/crates/"
+# WEBADDR="https://crates-io.s3-us-west-1.amazonaws.com/crates/"
 
 rm -rf DEBUG CRATES
 
@@ -79,7 +80,7 @@ done < deps
 # Don't actually use crates without checksums (not for download)
 grep -v -e ^$ -e ^# $PRGDIR/Cargo.lock > ignore1
 cat ignore1 | tr -d \\n > ignore2
-sed -i 's|package]]|package]]\n|g' ignore2 
+sed -i 's|package]]|package]]\n|g' ignore2
 grep -v "checksum =" ignore2 > ignore3
 grep ^name ignore3 > ignore4
 while read -r line; do
