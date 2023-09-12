@@ -1,10 +1,10 @@
-FROM perrin4869/slackware:15.0
+FROM vbatts/slackware:15.0
 MAINTAINER perrin4869 <julian@dotcore.co.il>
 
 ARG DEV_UID=1000
 ARG DEV_GID=1000
 ARG DEV_USER=limited
-ARG REPO="http://slackware.osuosl.org/slackware64-current/"
+ARG REPO="http://slackware.osuosl.org/slackware64-15.0/"
 RUN echo "${REPO}" > /etc/slackpkg/mirrors
 RUN yes y | slackpkg update gpg && \
     slackpkg update && \
