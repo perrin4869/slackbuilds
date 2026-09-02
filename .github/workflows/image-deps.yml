@@ -7,7 +7,7 @@ on:
     # API and no webhook of any kind - polling is the only option. sbopkg
     # (GitHub) rides along here too rather than getting its own trigger,
     # since both are "the image's build-time dependencies" as one concern,
-    # separate from SBo package detection (see detect.yml).
+    # separate from SBo package detection (see detect-push.yml / detect-pull.yml).
     - cron: '5 7 * * 1' # weekly - these change rarely
   workflow_dispatch: {}
 

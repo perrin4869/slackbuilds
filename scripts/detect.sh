@@ -14,7 +14,7 @@
 #   UNRESOLVED <prgnam>                               couldn't determine a latest version
 #
 # Diagnostics go to stderr so stdout stays script-parseable (consumed by
-# detect.yml to decide which packages to run generate.sh against).
+# detect-push.yml / detect-pull.yml to decide which packages to run generate.sh against).
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

@@ -3,7 +3,7 @@
 # line: regenerate the package at its real upstream path, render the PR
 # body, bump the .conf's dedupe VERSION, commit, push, and open the PR.
 #
-# Shared by detect.yml (push/webhook-triggered) and detect-pull.yml
+# Shared by detect-push.yml (webhook-triggered) and detect-pull.yml
 # (cron-triggered) - opening a PR is the same step regardless of how the
 # update was detected.
 #

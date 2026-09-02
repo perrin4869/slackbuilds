@@ -1,5 +1,5 @@
 ---
-name: Detect updates
+name: Detect updates (push)
 
 on:
   repository_dispatch:
@@ -14,7 +14,7 @@ on:
         required: false
 
 concurrency:
-  group: detect
+  group: detect-push
   cancel-in-progress: false
 
 permissions:
@@ -22,8 +22,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  detect:
-    name: Detect + open update PRs
+  detect-push:
+    name: Detect (push) + open update PRs
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -70,7 +70,7 @@ jobs:
         if: always()
         run: |
           {
-            echo '## Update detection'
+            echo '## Update detection (push)'
             echo
             echo '| status | package | detail |'
             echo '|---|---|---|'
