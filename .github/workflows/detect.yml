@@ -23,18 +23,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  sync-newreleases:
-    name: Sync newreleases.io tracked projects
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.package == ''
-    continue-on-error: true # advisory only - never block detection on this
-    steps:
-      - uses: actions/checkout@v5
-      - run: bash scripts/newreleases-sync.sh
-        env:
-          NEWRELEASES_API_KEY: ${{ secrets.NEWRELEASES_API_KEY }}
-          NEWRELEASES_WEBHOOK_ID: ${{ secrets.NEWRELEASES_WEBHOOK_ID }}
-
   detect:
     name: Detect + open update PRs
     runs-on: ubuntu-24.04

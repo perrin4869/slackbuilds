@@ -120,22 +120,29 @@ which newreleases.io's webhook fully covers. If a non-GitHub source
 to add a cron back - newreleases.io doesn't watch those at all, so nothing
 else would ever trigger detection for them.
 
-`scripts/newreleases-sync.sh` reconciles the tracked-project list on
-newreleases.io from `packages/*.conf`, so a new package only needs a
-`.conf` file here.
-
 This is deliberately a separate workflow from `detect-image-deps.yml`
 (below) - SBo package detection and image build-dependency detection are
 unrelated concerns that happen to share a similar "check a version, act on
 it" shape, not one job.
+
+`sync-newreleases.yml` reconciles the tracked-project list on
+newreleases.io with `packages/*.conf`, so adding a package here doesn't
+also mean remembering to add it on their site. It's a *third*, separate
+workflow, not a step in `detect.yml`: newreleases.io doesn't track "what
+this repo currently ships" at all - it independently watches each
+project's upstream repo for new releases, regardless of what we've merged
+- so there's nothing to tell it after a version-bump PR merges. The only
+thing that can actually invalidate the sync is the *tracked package list*
+changing, i.e. a push to master touching `packages/*.conf` - which is what
+it's triggered on (plus manual `workflow_dispatch`).
 
 ## Secrets required
 
 | Secret | Used by | Purpose |
 |---|---|---|
 | `SBO_SUBMIT_TOKEN` | `submit.yml` | Classic PAT, `repo` scope. Pushes to `perrin4869/sbo` and opens PRs against `SlackBuildsOrg/slackbuilds` - the default `GITHUB_TOKEN` can do neither. |
-| `NEWRELEASES_API_KEY` | `detect.yml` (sync job) | newreleases.io account API key. |
-| `NEWRELEASES_WEBHOOK_ID` | `detect.yml` (sync job) | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and `event_type: upstream-release`. |
+| `NEWRELEASES_API_KEY` | `sync-newreleases.yml` | newreleases.io account API key. |
+| `NEWRELEASES_WEBHOOK_ID` | `sync-newreleases.yml` | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and `event_type: upstream-release`. |
 
 ## A load-bearing detail: the `local` repo slot
 
