@@ -29,13 +29,36 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Determine target package
+        id: target
+        env:
+          # Only set for repository_dispatch, and only if the webhook was
+          # configured with the client_payload template - see README.
+          PROJECT: ${{ github.event.client_payload.project }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.package }}" ]; then
+            package="${{ github.event.inputs.package }}"
+          elif [ -n "$PROJECT" ]; then
+            source scripts/lib.sh
+            package="$(find_package_by_repo "$PROJECT")"
+            if [ -n "$package" ]; then
+              echo "webhook names $PROJECT -> scoping to $package"
+            else
+              echo "webhook names $PROJECT, no packages/*.conf matches it - checking everything"
+            fi
+          else
+            package=""
+          fi
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+
       - name: Run detect.sh
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
-          bash scripts/detect.sh ${{ github.event.inputs.package }} | tee detect-output.txt
+          bash scripts/detect.sh ${{ steps.target.outputs.package }} | tee detect-output.txt
 
       - name: Job summary
         if: always()

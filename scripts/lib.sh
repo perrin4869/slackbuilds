@@ -38,6 +38,23 @@ load_package_conf() {
     GENERATOR="${GENERATOR:-tarball}"
 }
 
+# Print the PRGNAM whose packages/*.conf declares GITHUB_REPO or
+# CODEBERG_REPO equal to $1 (an "owner/repo" string), or nothing if none
+# matches. Lets a repository_dispatch payload that names the upstream
+# project which changed scope detection to that one package, instead of
+# re-checking every package on every webhook firing.
+find_package_by_repo() {
+    local repo="$1" conf
+    for conf in packages/*.conf; do
+        [ -e "$conf" ] || continue
+        load_package_conf "$conf"
+        if [ "${GITHUB_REPO:-}" = "$repo" ] || [ "${CODEBERG_REPO:-}" = "$repo" ]; then
+            echo "$PRGNAM"
+            return
+        fi
+    done
+}
+
 # %VERSION% substitution used in SRC_URL / ARCHIVE / PRGDIR templates.
 subst_version() {
     local template="$1" version="$2"

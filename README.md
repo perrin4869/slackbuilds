@@ -110,9 +110,39 @@ in the run summary, so they don't rot silently.
 
 `detect.yml` runs on a `repository_dispatch: upstream-release` event, fired
 by a [newreleases.io](https://newreleases.io/) webhook watching each
-tracked project, or manually via `workflow_dispatch`. The webhook is a
-trigger only - it carries no version info, so every firing just re-runs
-`detect.sh` over every package.
+tracked project, or manually via `workflow_dispatch`.
+
+The webhook payload names which project changed
+(`client_payload.project`), so a firing is scoped to just that one
+package (mapped back to a `prgnam` via `GITHUB_REPO`/`CODEBERG_REPO` in
+`packages/*.conf`) instead of re-checking everything. It still goes
+through `detect.sh`'s normal resolution and `TAG_REGEX` filtering rather
+than trusting the webhook's own version field - that filter exists
+precisely because raw upstream signals (test tags, LTS backports, etc.)
+aren't trustworthy on their own; the webhook only saves re-checking
+*every other* package. If the payload is missing or names a project no
+`.conf` matches (manual dispatch with no `package` input, or a
+misconfigured webhook), it falls back to checking every package - the
+same behavior as before this scoping existed.
+
+**Webhook payload template** (newreleases.io → your webhook → payload
+fields), since the default payload doesn't reach GitHub in a form it
+accepts - `repository_dispatch` requires the POST body shaped exactly as
+below:
+
+```json
+{
+  "event_type": "upstream-release",
+  "client_payload": {
+    "project": "{project}"
+  }
+}
+```
+
+`{project}` is newreleases.io's own template variable, filled in with the
+`provider/name` of whichever tracked project fired (e.g. `jj-vcs/jj`) -
+matching the `GITHUB_REPO`/`CODEBERG_REPO` value in that package's
+`.conf` file exactly.
 
 No cron backstop: every `packages/*.conf` right now is `SOURCE=github`,
 which newreleases.io's webhook fully covers. If a non-GitHub source
@@ -142,7 +172,7 @@ it's triggered on (plus manual `workflow_dispatch`).
 |---|---|---|
 | `SBO_SUBMIT_TOKEN` | `submit.yml` | Classic PAT, `repo` scope. Pushes to `perrin4869/sbo` and opens PRs against `SlackBuildsOrg/slackbuilds` - the default `GITHUB_TOKEN` can do neither. |
 | `NEWRELEASES_API_KEY` | `sync-newreleases.yml` | newreleases.io account API key. |
-| `NEWRELEASES_WEBHOOK_ID` | `sync-newreleases.yml` | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and `event_type: upstream-release`. |
+| `NEWRELEASES_WEBHOOK_ID` | `sync-newreleases.yml` | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and the payload template in "Detection" above. |
 
 ## A load-bearing detail: the `local` repo slot
 
