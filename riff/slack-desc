@@ -8,8 +8,8 @@
     |-----handy-ruler------------------------------------------------------|
 spot: spot (spotify player)
 spot:
-spot: Gtk/Rust native Spotify client for the GNOME desktop.
-spot: Only works with premium accounts!
+spot: Native Spotify client for the GNOME desktop.
+spot:
 spot:
 spot:
 spot:
