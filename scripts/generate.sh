@@ -1,7 +1,7 @@
 #!/bin/bash
 # Produce an updated .info + .SlackBuild for one package at a target version,
 # derived from a *fresh* upstream checkout - never from anything already in
-# this repo (staging/ included). See lib.sh header for why.
+# this repo. See lib.sh header for why.
 #
 # Usage:
 #   scripts/generate.sh <prgnam> <version> <upstream_checkout_dir> <out_dir>

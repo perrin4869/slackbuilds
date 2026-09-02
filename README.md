@@ -7,7 +7,7 @@ lints them, and - once a human merges the resulting PR here - opens the real
 PR upstream.
 
 ```
-upstream release ──▶ detect.yml opens a PR here (staging/<category>/<pkg>/)
+upstream release ──▶ detect.yml opens a PR here (<category>/<pkg>/)
                           │
                           ▼
                     check.yml: sbolint + sbopkg -B -i + sbopkglint,
@@ -27,22 +27,24 @@ as what got reviewed.
 
 ## Reviewing an update PR
 
-An update PR's *files* live under `staging/<category>/<prgnam>/`, not at the
-real upstream path (`<category>/<prgnam>/` in `SlackBuildsOrg/slackbuilds`) -
-that prefix is what lets this repo hold the file without colliding with
-anything, but it also means the PR's own file-diff tab doesn't read like the
-real upstream diff will.
+Each tracked package lives in this repo at `<category>/<prgnam>/` - **the
+exact same path it occupies in `SlackBuildsOrg/slackbuilds`**. That's
+deliberate: it means an update PR's own **Files changed** tab already *is*
+the real diff (full GitHub review UI - inline comments, viewed checkboxes,
+the works), not a diff to reconstruct or restate elsewhere. What you see
+there for `libraries/tree-sitter/tree-sitter.info` is exactly what lands at
+that same path upstream if you merge.
 
-So the PR **body** (rendered by `scripts/preview.sh`) is where you actually
-review the change: it states the exact commit message `submit.yml` will use,
-then shows a real unified diff computed against the true upstream paths -
-`libraries/tree-sitter/tree-sitter.info`, not
-`staging/libraries/tree-sitter/tree-sitter.info`. For a plain version bump
-that's a handful of lines; for a Rust package it's exactly which crates got
-bumped/added/removed, collapsed behind a `<details>` toggle since jujutsu's
-runs to ~550 lines. That diff is what merging the PR submits - modulo the
-re-derivation at merge time if upstream moved since the PR was opened, which
-`submit.yml` calls out explicitly if it happens.
+An earlier version of this pipeline held files under a `staging/` prefix
+and rendered a diff into the PR body instead - reviewable, but body text
+has none of the Files-changed tab's tooling (no inline comments, no
+per-line threading), so it was dropped in favor of the real thing.
+
+The PR body (`scripts/preview.sh`) now just states the plain facts: the
+exact commit message `submit.yml` will use, and that it re-derives against
+a fresh upstream clone at merge time rather than trusting what was
+reviewed here - flagging it explicitly on the resulting upstream PR if
+upstream moved in the meantime.
 
 ## Layout
 
@@ -53,20 +55,22 @@ re-derivation at merge time if upstream moved since the PR was opened, which
 - `scripts/detect.sh` - resolves the latest valid version per package.
 - `scripts/generate.sh` - regenerates `.info` + `.SlackBuild` from a fresh
   upstream checkout at a target version.
-- `scripts/preview.sh` - renders the PR body: the exact commit message and a
-  real diff against the true upstream paths (see below).
+- `scripts/preview.sh` - renders the PR body: the commit message
+  `submit.yml` will use and a note about the merge-time re-derivation.
 - `scripts/submit.sh` - re-derives and pushes the upstream PR.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
   for Rust packages (originally run by hand; see `scripts/generate.sh`'s
   `rust`/`rust64` case for the invocation).
-- `staging/<category>/<prgnam>/` - the regenerated `.info`/`.SlackBuild` for a
-  package's last-detected update. **Kept, not deleted, after submission** -
-  it's the diff baseline for that package's *next* update PR, so the PR diff
-  shows exactly what changed (which crates got bumped, which `DOWNLOAD`/
-  `MD5SUM` lines moved) instead of a wall of "new file added" green lines
-  each time. `submit.yml` syncs it to the fresh copy it actually submitted
-  (correcting for any drift - see below), not the possibly-stale reviewed
-  copy, so the baseline stays accurate even when upstream moved in between.
+- `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild` at
+  its real upstream path (e.g. `libraries/tree-sitter/`), plus an
+  `UPDATE.json` recording the pending version/upstream SHA. **Kept, not
+  deleted, after submission** - it's the diff baseline for that package's
+  *next* update PR, so the Files-changed tab shows exactly what changed
+  (which crates got bumped, which `DOWNLOAD`/`MD5SUM` lines moved) instead
+  of a wall of "new file added" green lines each time. `submit.yml` syncs it
+  to the fresh copy it actually submitted (correcting for any drift), not
+  the possibly-stale reviewed copy, so the baseline stays accurate even
+  when upstream moved in between.
 
 ## Adding a package
 

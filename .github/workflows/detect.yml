@@ -102,14 +102,13 @@ jobs:
               https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
             upstream_sha="$(git -C "$upstream_dir" rev-parse HEAD)"
 
-            rm -rf "staging/${category}/${prgnam}"
-            mkdir -p "staging/${category}/${prgnam}"
-            bash scripts/generate.sh "$prgnam" "$version" "$upstream_dir" "staging/${category}/${prgnam}"
+            rm -rf "${category}/${prgnam}"
+            mkdir -p "${category}/${prgnam}"
+            bash scripts/generate.sh "$prgnam" "$version" "$upstream_dir" "${category}/${prgnam}"
 
-            bash scripts/preview.sh "$prgnam" "$version" "$upstream_dir" "staging/${category}/${prgnam}" \
-              > /tmp/pr-body.md
+            bash scripts/preview.sh "$prgnam" "$version" > /tmp/pr-body.md
 
-            cat > "staging/${category}/${prgnam}/UPDATE.json" <<EOF
+            cat > "${category}/${prgnam}/UPDATE.json" <<EOF
           {
             "prgnam": "$prgnam",
             "category": "$category",
@@ -121,7 +120,7 @@ jobs:
             sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
 
             git checkout -b "$branch"
-            git add "staging/${category}/${prgnam}" "packages/${prgnam}.conf"
+            git add "${category}/${prgnam}" "packages/${prgnam}.conf"
             git commit -m "${category}/${prgnam}: Updated for version ${version}"
             git push origin "$branch"
 

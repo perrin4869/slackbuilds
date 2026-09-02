@@ -3,7 +3,7 @@
 #
 # Conventions used throughout this pipeline:
 #  - "upstream" always means SlackBuildsOrg/slackbuilds@master, fetched fresh.
-#    Nothing in this repo (staging/, packages/*.conf VERSION) is ever treated
+#    Nothing in this repo (per-package dirs, packages/*.conf VERSION) is ever treated
 #    as a base to diff or build against - see the plan's "Hard constraint".
 #  - Package configs live in packages/<prgnam>.conf and are sourced, not parsed.
 

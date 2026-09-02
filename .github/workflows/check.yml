@@ -5,7 +5,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - 'staging/**'
+      - '**/UPDATE.json'
 
 concurrency:
   group: check-${{ github.event.pull_request.number }}
@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           changed="$(git diff --name-only \
               "origin/${{ github.event.pull_request.base.ref }}" HEAD \
-              -- 'staging/*/*/UPDATE.json' \
+              -- '*/*/UPDATE.json' \
             | xargs -r -n1 dirname | sort -u)"
 
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"

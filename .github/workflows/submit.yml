@@ -5,7 +5,7 @@ on:
   push:
     branches: [master]
     paths:
-      - 'staging/**'
+      - '**/UPDATE.json'
 
 concurrency:
   group: submit
@@ -27,7 +27,7 @@ jobs:
       - id: list
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only HEAD~1 HEAD -- 'staging/*/*/UPDATE.json' \
+          changed="$(git diff --name-only HEAD~1 HEAD -- '*/*/UPDATE.json' \
             | xargs -r -n1 dirname | sort -u)"
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
           echo "packages=$json" >> "$GITHUB_OUTPUT"
@@ -56,7 +56,7 @@ jobs:
           echo "result=$(cat submit-output.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Commit drift correction, if any
-        # scripts/submit.sh syncs staging/<pkg>/ to the fresh copy it
+        # scripts/submit.sh syncs <category>/<prgnam>/ to the fresh copy it
         # actually submitted (not the possibly-stale reviewed copy) and
         # leaves it in place - it's the diff baseline for this package's
         # *next* update PR, not a one-off review artifact. Usually nothing
@@ -64,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet -- "${{ matrix.package }}"; then
-            echo "no drift - staging/ already matched what was submitted"
+            echo "no drift - already matched what was submitted"
             exit 0
           fi
           git config user.name "github-actions[bot]"

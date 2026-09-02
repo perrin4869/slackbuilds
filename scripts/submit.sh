@@ -3,15 +3,19 @@
 # perrin4869/sbo fork, for a package that passed check.yml here.
 #
 # Deliberately re-derives from a FRESH upstream clone at HEAD rather than
-# trusting staging/ or the SHA recorded in UPDATE.json - upstream may have
-# rewritten the package (a mass script pass, another contributor's PR)
+# trusting this repo's copy or the SHA recorded in UPDATE.json - upstream may
+# have rewritten the package (a mass script pass, another contributor's PR)
 # since this repo's PR was reviewed, and upstream is always the source of
 # truth. If the fresh result differs from what was reviewed, we still
-# submit it (silently discarding stale staged output would be worse), but
+# submit it (silently discarding stale reviewed output would be worse), but
 # flag the drift loudly so a human notices.
 #
 # Usage:
-#   scripts/submit.sh <prgnam> <version> <staging_dir>
+#   scripts/submit.sh <prgnam> <version> <pkg_dir>
+#
+# <pkg_dir> is this repo's own <category>/<prgnam>/ - the same path the
+# package occupies upstream, kept here as the diff baseline for future
+# update PRs (see README's "Reviewing an update PR").
 #
 # Requires:
 #   SBO_SUBMIT_TOKEN   - PAT with `repo` scope; GITHUB_TOKEN can't push to
@@ -27,7 +31,7 @@ source scripts/lib.sh
 
 prgnam="${1:?prgnam required}"
 version="${2:?version required}"
-staging_dir="${3:?staging dir required}"
+pkg_dir="${3:?pkg dir required}"
 
 : "${SBO_SUBMIT_TOKEN:?SBO_SUBMIT_TOKEN not set}"
 SBO_FORK="${SBO_FORK:-perrin4869/sbo}"
@@ -38,8 +42,8 @@ conf="packages/${prgnam}.conf"
 load_package_conf "$conf"
 [ "$prgnam" = "$PRGNAM" ] || die "packages/${prgnam}.conf declares PRGNAM=$PRGNAM"
 
-[ -f "$staging_dir/${PRGNAM}.info" ]       || die "missing $staging_dir/${PRGNAM}.info"
-[ -f "$staging_dir/${PRGNAM}.SlackBuild" ] || die "missing $staging_dir/${PRGNAM}.SlackBuild"
+[ -f "$pkg_dir/${PRGNAM}.info" ]       || die "missing $pkg_dir/${PRGNAM}.info"
+[ -f "$pkg_dir/${PRGNAM}.SlackBuild" ] || die "missing $pkg_dir/${PRGNAM}.SlackBuild"
 
 # --- re-check against upstream HEAD, not the SHA this PR was opened against -
 current_upstream_version="$(upstream_version "$CATEGORY" "$PRGNAM")"
@@ -62,21 +66,21 @@ bash scripts/generate.sh "$prgnam" "$version" "$workdir/upstream" "$fresh_dir"
 # --- drift check: fresh-derived output vs. what was reviewed in the PR -----
 drifted=false
 for f in "${PRGNAM}.info" "${PRGNAM}.SlackBuild"; do
-    if ! diff -q "$fresh_dir/$f" "$staging_dir/$f" >/dev/null 2>&1; then
+    if ! diff -q "$fresh_dir/$f" "$pkg_dir/$f" >/dev/null 2>&1; then
         drifted=true
-        log "warning: $f differs between the reviewed staging/ copy and a fresh regeneration - upstream moved since review. Using the fresh copy."
+        log "warning: $f differs between the reviewed copy and a fresh regeneration - upstream moved since review. Using the fresh copy."
     fi
 done
 
-# --- push the branch + commit, using the fresh (not staged) files ---------
-pkg_dir="$workdir/upstream/${CATEGORY}/${PRGNAM}"
-cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
+# --- push the branch + commit, using the fresh (not reviewed) files -------
+upstream_pkg_dir="$workdir/upstream/${CATEGORY}/${PRGNAM}"
+cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$upstream_pkg_dir/"
 
-# staging_dir is kept (not deleted) as the diff baseline for this package's
+# pkg_dir is kept (not deleted) as the diff baseline for this package's
 # *next* update PR - synced to the fresh copy, not the possibly-drifted
 # reviewed one, so that baseline always reflects what was actually
 # submitted. The caller (submit.yml) commits this only if it changed.
-cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$staging_dir/"
+cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
 
 commit_msg="${CATEGORY}/${PRGNAM}: Updated for version ${version}"
 branch="${PRGNAM}/${version}"
