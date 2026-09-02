@@ -35,15 +35,18 @@ jobs:
             | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
-      - name: Run detect.sh
+      - name: Detect
+        id: detect
+        uses: ./.github/actions/detect
+        with:
+          packages: ${{ steps.list.outputs.packages }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -o pipefail
-          bash scripts/detect.sh ${{ steps.list.outputs.packages }} | tee detect-output.txt
 
       - name: Job summary
         if: always()
+        env:
+          DETECT_OUTPUT: ${{ steps.detect.outputs.result }}
         run: |
           {
             echo '## Poll results'
@@ -53,10 +56,11 @@ jobs:
             while IFS=' ' read -r status prgnam rest; do
               [ -n "$status" ] || continue
               printf '| %s | %s | %s |\n' "$status" "$prgnam" "$rest"
-            done < detect-output.txt
+            done <<< "$DETECT_OUTPUT"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Open update PRs
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/open-update-prs.sh detect-output.txt
+        uses: ./.github/actions/open-update-prs
+        with:
+          detect-output: ${{ steps.detect.outputs.result }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

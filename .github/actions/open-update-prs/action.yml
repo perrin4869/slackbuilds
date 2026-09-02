@@ -1,0 +1,80 @@
+name: Open update PRs
+description: >-
+  Given the detect action's output, open an update PR here for every
+  NEEDS_UPDATE line: regenerate the package at its real upstream path,
+  render the PR body, bump the .conf's dedupe VERSION, commit, push, and
+  open the PR. Shared by webhook.yml (webhook-triggered) and poll.yml
+  (cron-triggered) - opening a PR is the same step regardless of how the
+  update was found.
+inputs:
+  detect-output:
+    description: The `detect` action's `result` output.
+    required: true
+  github-token:
+    description: Token for `gh`.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        # Passed via env, not interpolated into the script body, since this
+        # ultimately derives from upstream tag data, not just our own
+        # packages/*.conf - see the security note in the repo README.
+        DETECT_OUTPUT: ${{ inputs.detect-output }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        source scripts/lib.sh
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        while read -r status prgnam category version; do
+            [ "$status" = NEEDS_UPDATE ] || continue
+
+            branch="update/${prgnam}-${version}"
+            echo "::group::${prgnam} -> ${version}"
+
+            git fetch origin "$branch" 2>/dev/null && {
+                echo "branch $branch already exists, skipping"
+                echo "::endgroup::"
+                continue
+            }
+
+            upstream_dir="$(mktemp -d)"
+            git clone --quiet --depth 1 --branch master \
+                https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
+            upstream_sha="$(git -C "$upstream_dir" rev-parse HEAD)"
+
+            rm -rf "${category}/${prgnam}"
+            mkdir -p "${category}/${prgnam}"
+            generate_package "$prgnam" "$version" "$upstream_dir" "${category}/${prgnam}"
+
+            render_pr_body "$prgnam" "$version" > /tmp/pr-body.md
+
+            cat > "${category}/${prgnam}/UPDATE.json" <<EOF
+        {
+          "prgnam": "$prgnam",
+          "category": "$category",
+          "version": "$version",
+          "upstream_sha": "$upstream_sha"
+        }
+        EOF
+
+            sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
+
+            git checkout -b "$branch"
+            git add "${category}/${prgnam}" "packages/${prgnam}.conf"
+            git commit -m "${category}/${prgnam}: Updated for version ${version}"
+            git push origin "$branch"
+
+            gh pr create \
+                --title "${category}/${prgnam}: Updated for version ${version}" \
+                --body-file /tmp/pr-body.md \
+                --head "$branch" --base master
+
+            git checkout -
+            rm -rf "$upstream_dir"
+            echo "::endgroup::"
+        done <<< "$DETECT_OUTPUT"

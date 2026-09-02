@@ -40,31 +40,52 @@ and rendered a diff into the PR body instead - reviewable, but body text
 has none of the Files-changed tab's tooling (no inline comments, no
 per-line threading), so it was dropped in favor of the real thing.
 
-The PR body (`scripts/preview.sh`) now just states the plain facts: the
-exact commit message `submit.yml` will use, and that it re-derives against
-a fresh upstream clone at merge time rather than trusting what was
-reviewed here - flagging it explicitly on the resulting upstream PR if
-upstream moved in the meantime.
+The PR body (`render_pr_body`, in `scripts/lib.sh`) now just states the
+plain facts: the exact commit message `submit.yml` will use, and that it
+re-derives against a fresh upstream clone at merge time rather than
+trusting what was reviewed here - flagging it explicitly on the resulting
+upstream PR if upstream moved in the meantime.
 
 ## Layout
+
+Scripts are used sparingly, and only where they genuinely have to be: a
+few functions need to be callable from *inside a loop* (once per detected
+update), which a reusable GitHub Action can't be - actions are static
+workflow steps, not something you invoke dynamically from within a bash
+loop. Anything else lives directly in the workflow that calls it, or as a
+composite action if more than one workflow needs it.
 
 - `packages/<prgnam>.conf` - one file per tracked package: category, upstream
   source, tag-matching regex, generator kind (`tarball`, the default, or
   `rust`/`rust64`), and `FROZEN=1` for packages that can't be updated right
   now (see below).
-- `scripts/detect.sh` - resolves the latest valid version per package.
-- `scripts/generate.sh` - regenerates `.info` + `.SlackBuild` from a fresh
-  upstream checkout at a target version.
-- `scripts/preview.sh` - renders the PR body: the commit message
-  `submit.yml` will use and a note about the merge-time re-derivation.
-- `scripts/open-update-prs.sh` - given `detect.sh`'s output, generates and
-  opens an update PR for every `NEEDS_UPDATE` line. Shared by `webhook.yml`
-  and `poll.yml` - opening a PR is the same step regardless of how
-  the update was found.
-- `scripts/submit.sh` - re-derives and pushes the upstream PR.
+- `scripts/lib.sh` - shared helpers, sourced by every workflow/action that
+  needs them: version resolvers per `SOURCE` type, `.info` parsing,
+  `generate_package()` (regenerates `.info`+`.SlackBuild` from a fresh
+  upstream checkout) and `render_pr_body()` - both called once per
+  detected update from inside `open-update-prs`'s loop and (the former)
+  again from `submit.yml`, so they have to be plain functions, not actions.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
-  for Rust packages (originally run by hand; see `scripts/generate.sh`'s
-  `rust`/`rust64` case for the invocation).
+  for Rust packages (originally run by hand; see `generate_package()`'s
+  `rust`/`rust64` case for the invocation). Kept as real scripts, not
+  functions - substantial standalone tools in their own right, not glue.
+- `.github/actions/detect` - resolves the latest valid version for one,
+  several, or all tracked packages and decides which need an update PR.
+  A composite action (not a script) because both `webhook.yml` and
+  `poll.yml` call it.
+- `.github/actions/open-update-prs` - given `detect`'s output, opens an
+  update PR for every `NEEDS_UPDATE` line. Also a composite action for the
+  same reason - shared by `webhook.yml` and `poll.yml`.
+
+`detect`'s output (and `open-update-prs`'s `detect-output` input) carries
+data that ultimately derives from upstream tag names, not just this
+repo's own config - so callers pass it via `env:` rather than
+interpolating `${{ }}` directly into a `run:` script body. The latter is
+a real GitHub Actions footgun: `${{ }}` in a `run:` block is substituted
+as raw text *before* the shell parses it, so untrusted content there can
+break out of the intended command. An `env:` value becomes a plain
+environment variable instead - substituted once, read safely as `"$VAR"`.
+
 - `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild` at
   its real upstream path (e.g. `libraries/tree-sitter/`), plus an
   `UPDATE.json` recording the pending version/upstream SHA. **Kept, not
@@ -115,8 +136,8 @@ FROZEN=1
 FROZEN_REASON="why, and what unblocks it"
 ```
 
-`detect.sh` skips frozen packages but still reports how far behind they are
-in the run summary, so they don't rot silently.
+The `detect` action skips frozen packages but still reports how far behind
+they are in the run summary, so they don't rot silently.
 
 ## Detection
 
@@ -128,7 +149,7 @@ The webhook payload names which project changed
 (`client_payload.project`), so a firing is scoped to just that one
 package (mapped back to a `prgnam` via `GITHUB_REPO`/`CODEBERG_REPO` in
 `packages/*.conf`) instead of re-checking everything. It still goes
-through `detect.sh`'s normal resolution and `TAG_REGEX` filtering rather
+through the `detect` action's normal resolution and `TAG_REGEX` filtering rather
 than trusting the webhook's own version field - that filter exists
 precisely because raw upstream signals (test tags, LTS backports, etc.)
 aren't trustworthy on their own; the webhook only saves re-checking
@@ -168,10 +189,10 @@ exactly the packages a webhook *can't* reach:
   service like newreleases.io to watch, so polling is the only option.
   It installs [nvchecker](https://github.com/lilydjwg/nvchecker) itself,
   finds the poll-based packages by grepping `packages/*.conf` for
-  `SOURCE=nvchecker`, then reuses the exact same `detect.sh` +
-  `scripts/open-update-prs.sh` as `webhook.yml` - push vs. pull only
-  changes *how a package's turn to be checked comes up*, not what happens
-  once it is.
+  `SOURCE=nvchecker`, then reuses the exact same `detect` +
+  `open-update-prs` actions as `webhook.yml` - push vs. pull only changes
+  *how a package's turn to be checked comes up*, not what happens once it
+  is.
 
 This push/pull split mirrors `image.yml`/`image-deps.yml`'s (below) -
 detection workflows are separated by trigger mechanism, not bundled by
