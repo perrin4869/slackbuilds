@@ -1,0 +1,31 @@
+---
+name: Detect image dependency updates
+
+on:
+  schedule:
+    # sbo-maintainer-tools is hosted on a self-run cgit instance with no
+    # API and no webhook of any kind - polling is the only option. sbopkg
+    # (GitHub) rides along here too rather than getting its own trigger,
+    # since both are "the image's build-time dependencies" as one concern,
+    # separate from SBo package detection (see detect.yml).
+    - cron: '5 7 * * 1' # weekly - these change rarely
+  workflow_dispatch: {}
+
+concurrency:
+  group: detect-image-deps
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # to dispatch image.yml directly for sbo-maintainer-tools
+
+jobs:
+  detect-image-deps:
+    name: Detect sbopkg / sbo-maintainer-tools releases
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/detect-image-deps.sh

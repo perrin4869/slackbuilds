@@ -61,6 +61,11 @@ upstream moved in the meantime.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
   for Rust packages (originally run by hand; see `scripts/generate.sh`'s
   `rust`/`rust64` case for the invocation).
+- `scripts/detect-image-deps.sh` - tracks the image's own build-time
+  dependencies (sbopkg, sbo-maintainer-tools), separate from SBo package
+  detection - see "Image" below.
+- `image/sbo-maintainer-tools.version` - last version `detect-image-deps.sh`
+  dispatched a rebuild for; not consulted by the build itself.
 - `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild` at
   its real upstream path (e.g. `libraries/tree-sitter/`), plus an
   `UPDATE.json` recording the pending version/upstream SHA. **Kept, not
@@ -119,6 +124,11 @@ else would ever trigger detection for them.
 newreleases.io from `packages/*.conf`, so a new package only needs a
 `.conf` file here.
 
+This is deliberately a separate workflow from `detect-image-deps.yml`
+(below) - SBo package detection and image build-dependency detection are
+unrelated concerns that happen to share a similar "check a version, act on
+it" shape, not one job.
+
 ## Secrets required
 
 | Secret | Used by | Purpose |
@@ -143,6 +153,25 @@ checking at all and is meant for exactly this - a manually-populated tree.
 
 `ghcr.io/perrin4869/slackbuilds:15.0`, built by `image.yml` on every
 `Dockerfile` change and monthly (to pick up Slackware package updates).
-`SBOPKG_VERSION` is a build `ARG`; `scripts/detect-image-deps.sh` (run from
-`detect.yml`) opens a PR bumping it when a new sbopkg release ships, and
-merging that PR triggers a rebuild via the `Dockerfile`-change trigger.
+
+`detect-image-deps.yml` (weekly cron + `workflow_dispatch` - no webhook
+option exists for either dependency, see below) runs
+`scripts/detect-image-deps.sh` for the image's two build-time dependencies,
+which are tracked differently because one is pinned and one isn't:
+
+- **sbopkg** is pinned via the Dockerfile's `SBOPKG_VERSION` ARG, fetched
+  from a specific GitHub release. A new release opens a PR bumping it;
+  merging triggers a rebuild via `image.yml`'s `Dockerfile`-change trigger.
+- **sbo-maintainer-tools** has no pin - the Dockerfile just installs
+  whatever `sbopkg -B -i sbo-maintainer-tools` finds in the currently-synced
+  SBo mirror at build time, so there's no Dockerfile line to bump and no
+  diff to review. A new release just needs a rebuild: the script commits
+  the new version to `image/sbo-maintainer-tools.version` (purely to avoid
+  redispatching one on every run) and directly dispatches `image.yml`.
+
+Both are hosted somewhere `newreleases.io` can't watch as a webhook:
+sbopkg *could* be (it's on GitHub) but isn't, to keep both dependencies on
+one schedule; sbo-maintainer-tools is on the maintainer's own cgit
+instance, which - like `git.kernel.org` - has no API at all, only HTML to
+scrape (`scripts/lib.sh`'s `resolve_kernel_cgit_version`, shared with
+`libtraceevent`).

@@ -35,19 +35,6 @@ jobs:
           NEWRELEASES_API_KEY: ${{ secrets.NEWRELEASES_API_KEY }}
           NEWRELEASES_WEBHOOK_ID: ${{ secrets.NEWRELEASES_WEBHOOK_ID }}
 
-  detect-image-deps:
-    name: Detect sbopkg release
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.package == ''
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v5
-      - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/detect-image-deps.sh
-
   detect:
     name: Detect + open update PRs
     runs-on: ubuntu-24.04
