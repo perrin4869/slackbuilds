@@ -25,14 +25,36 @@ package (a mass script pass, someone else's PR) between review and merge, so
 nothing here is ever treated as a base to build the submission from - only
 as what got reviewed.
 
+## Reviewing an update PR
+
+An update PR's *files* live under `staging/<category>/<prgnam>/`, not at the
+real upstream path (`<category>/<prgnam>/` in `SlackBuildsOrg/slackbuilds`) -
+that prefix is what lets this repo hold the file without colliding with
+anything, but it also means the PR's own file-diff tab doesn't read like the
+real upstream diff will.
+
+So the PR **body** (rendered by `scripts/preview.sh`) is where you actually
+review the change: it states the exact commit message `submit.yml` will use,
+then shows a real unified diff computed against the true upstream paths -
+`libraries/tree-sitter/tree-sitter.info`, not
+`staging/libraries/tree-sitter/tree-sitter.info`. For a plain version bump
+that's a handful of lines; for a Rust package it's exactly which crates got
+bumped/added/removed, collapsed behind a `<details>` toggle since jujutsu's
+runs to ~550 lines. That diff is what merging the PR submits - modulo the
+re-derivation at merge time if upstream moved since the PR was opened, which
+`submit.yml` calls out explicitly if it happens.
+
 ## Layout
 
 - `packages/<prgnam>.conf` - one file per tracked package: category, upstream
-  source, tag-matching regex, generator kind (`simple` / `rust` / `rust64`),
-  and `FROZEN=1` for packages that can't be updated right now (see below).
+  source, tag-matching regex, generator kind (`tarball`, the default, or
+  `rust`/`rust64`), and `FROZEN=1` for packages that can't be updated right
+  now (see below).
 - `scripts/detect.sh` - resolves the latest valid version per package.
 - `scripts/generate.sh` - regenerates `.info` + `.SlackBuild` from a fresh
   upstream checkout at a target version.
+- `scripts/preview.sh` - renders the PR body: the exact commit message and a
+  real diff against the true upstream paths (see below).
 - `scripts/submit.sh` - re-derives and pushes the upstream PR.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
   for Rust packages (originally run by hand; see `scripts/generate.sh`'s

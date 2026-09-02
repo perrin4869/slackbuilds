@@ -106,6 +106,9 @@ jobs:
             mkdir -p "staging/${category}/${prgnam}"
             bash scripts/generate.sh "$prgnam" "$version" "$upstream_dir" "staging/${category}/${prgnam}"
 
+            bash scripts/preview.sh "$prgnam" "$version" "$upstream_dir" "staging/${category}/${prgnam}" \
+              > /tmp/pr-body.md
+
             cat > "staging/${category}/${prgnam}/UPDATE.json" <<EOF
           {
             "prgnam": "$prgnam",
@@ -124,7 +127,7 @@ jobs:
 
             gh pr create \
               --title "${category}/${prgnam}: Updated for version ${version}" \
-              --body "Detected upstream update. Merging this PR (after check.yml passes) submits the corresponding PR to SlackBuildsOrg/slackbuilds." \
+              --body-file /tmp/pr-body.md \
               --head "$branch" --base master
 
             git checkout -
