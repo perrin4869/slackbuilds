@@ -1,0 +1,103 @@
+# slackbuilds
+
+Maintainer pipeline for Julian Grinblat's (`julian@dotcore.co.il`) packages on
+[SlackBuilds.org](https://slackbuilds.org/). Upstream `SlackBuildsOrg/slackbuilds@master`
+is always the source of truth; this repo only detects updates, builds and
+lints them, and - once a human merges the resulting PR here - opens the real
+PR upstream.
+
+```
+upstream release ──▶ detect.yml opens a PR here (staging/<category>/<pkg>/)
+                          │
+                          ▼
+                    check.yml: sbolint + sbopkg -B -i + sbopkglint,
+                    in ghcr.io/perrin4869/slackbuilds:15.0
+                          │
+                     you review + merge
+                          │
+                          ▼
+                    submit.yml: re-derives from a FRESH upstream clone,
+                    pushes perrin4869/sbo branch, opens the upstream PR
+```
+
+The re-derivation in `submit.yml` is deliberate: upstream may rewrite a
+package (a mass script pass, someone else's PR) between review and merge, so
+nothing here is ever treated as a base to build the submission from - only
+as what got reviewed.
+
+## Layout
+
+- `packages/<prgnam>.conf` - one file per tracked package: category, upstream
+  source, tag-matching regex, generator kind (`simple` / `rust` / `rust64`),
+  and `FROZEN=1` for packages that can't be updated right now (see below).
+- `scripts/detect.sh` - resolves the latest valid version per package.
+- `scripts/generate.sh` - regenerates `.info` + `.SlackBuild` from a fresh
+  upstream checkout at a target version.
+- `scripts/submit.sh` - re-derives and pushes the upstream PR.
+- `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
+  for Rust packages (originally run by hand; see `scripts/generate.sh`'s
+  `rust`/`rust64` case for the invocation).
+- `staging/<category>/<prgnam>/` - transient: the regenerated files for an
+  open update PR, removed by `submit.yml` once submitted upstream.
+
+## Adding a package
+
+Add `packages/<prgnam>.conf`. See any existing file for the shape; a plain
+GitHub-tagged, non-Rust package only needs `CATEGORY`, `PRGNAM`, `SOURCE`,
+`GITHUB_REPO`, `TAG_REGEX`, `GENERATOR=simple`, `SRC_URL`/`ARCHIVE`/`PRGDIR`
+templates, and a starting `VERSION`. `TAG_REGEX` matters more than it looks:
+newest-by-date tags are frequently unrelated branches or test tags, so it
+must be an anchored pattern (`^v([0-9]+\.[0-9]+\.[0-9]+)$`) with the version
+in capture group 1.
+
+Freezing a package (e.g. blocked on a Slackware/glibc version) adds:
+
+```sh
+FROZEN=1
+FROZEN_REASON="why, and what unblocks it"
+```
+
+`detect.sh` skips frozen packages but still reports how far behind they are
+in the run summary, so they don't rot silently.
+
+## Detection
+
+`detect.yml` runs on a `repository_dispatch: upstream-release` event (fired
+by a [newreleases.io](https://newreleases.io/) webhook watching each
+tracked project) and on a daily cron backstop. The webhook is a trigger
+only - it carries no version info, so every firing just re-runs
+`detect.sh` over every package. The cron backstop exists because
+newreleases.io doesn't cover every source this repo tracks (sr.ht Mercurial,
+kernel.org cgit) and because a webhook can be silently dropped.
+
+`scripts/newreleases-sync.sh` reconciles the tracked-project list on
+newreleases.io from `packages/*.conf`, so a new package only needs a
+`.conf` file here.
+
+## Secrets required
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `SBO_SUBMIT_TOKEN` | `submit.yml` | Classic PAT, `repo` scope. Pushes to `perrin4869/sbo` and opens PRs against `SlackBuildsOrg/slackbuilds` - the default `GITHUB_TOKEN` can do neither. |
+| `NEWRELEASES_API_KEY` | `detect.yml` (sync job) | newreleases.io account API key. |
+| `NEWRELEASES_WEBHOOK_ID` | `detect.yml` (sync job) | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and `event_type: upstream-release`. |
+
+## A load-bearing detail: the `local` repo slot
+
+`check.yml` mounts the working tree at `/var/lib/sbopkg/local/local` (with
+`REPO_NAME=local REPO_BRANCH=local`), **not** `/var/lib/sbopkg/SBo/15.0`. The
+`SBo/15.0` slot (`/etc/sbopkg/repos.d/40-sbo.repo`) has `CheckGPG=GPG`, which
+verifies the downloaded source tarball's signature against SBo's separate
+signed source-archive mirror - a signature a plain `git clone` of upstream
+has no way to satisfy. Under `-e stop` that "failure" is treated as a real
+build error: sbopkg deletes the source directory and aborts, so *every*
+build would fail this way. The `local` slot (`50-local.repo`) has no GPG
+checking at all and is meant for exactly this - a manually-populated tree.
+
+## Image
+
+`ghcr.io/perrin4869/slackbuilds:15.0`, built by `image.yml` on every
+`Dockerfile` change and monthly (to pick up Slackware package updates).
+`SBOPKG_VERSION` is a build `ARG`; `scripts/detect-image-deps.sh` (run from
+`detect.yml`) opens a PR bumping it when a new sbopkg release ships, and
+merging that PR triggers a rebuild via the `Dockerfile`-change trigger.

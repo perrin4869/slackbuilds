@@ -1,0 +1,120 @@
+---
+name: Build check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'staging/**'
+
+concurrency:
+  group: check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Discover changed packages
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: list
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only \
+              "origin/${{ github.event.pull_request.base.ref }}" HEAD \
+              -- 'staging/*/*/UPDATE.json' \
+            | xargs -r -n1 dirname | sort -u)"
+
+          json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
+          echo "packages=$json" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.package }}
+    needs: discover
+    if: needs.discover.outputs.packages != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Free disk space / point Docker at /mnt
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL || true
+          sudo systemctl stop docker
+          sudo mkdir -p /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker
+
+      - name: Read UPDATE.json
+        id: meta
+        run: |
+          category="$(dirname "${{ matrix.package }}" | xargs basename)"
+          prgnam="$(basename "${{ matrix.package }}")"
+          upstream_sha="$(jq -r .upstream_sha "${{ matrix.package }}/UPDATE.json")"
+          echo "category=$category" >> "$GITHUB_OUTPUT"
+          echo "prgnam=$prgnam" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Clone upstream at recorded SHA and overlay staged files
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/SlackBuildsOrg/slackbuilds.git upstream-tree
+          git -C upstream-tree checkout --quiet "${{ steps.meta.outputs.upstream_sha }}"
+
+          pkg_dir="upstream-tree/${{ steps.meta.outputs.category }}/${{ steps.meta.outputs.prgnam }}"
+          cp "${{ matrix.package }}/${{ steps.meta.outputs.prgnam }}.info" "$pkg_dir/"
+          cp "${{ matrix.package }}/${{ steps.meta.outputs.prgnam }}.SlackBuild" "$pkg_dir/"
+
+      - name: Pull build image
+        run: docker pull ghcr.io/perrin4869/slackbuilds:15.0
+
+      - name: sbolint + build + sbopkglint
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # Mounted under the "local" repo slot (/etc/sbopkg/repos.d/50-local.repo),
+          # not "SBo/15.0" - that slot's CheckGPG=GPG verifies the downloaded
+          # source tarball against SBo's separate signed source-archive mirror,
+          # which a plain upstream git clone has no matching signature for.
+          # Under -e stop that "failure" is treated as a real build error and
+          # sbopkg deletes the source directory and stops - so every single
+          # build would fail. The "local" slot has no GPG checking at all.
+          docker run --rm \
+            -v "$PWD/upstream-tree:/var/lib/sbopkg/local/local" \
+            -v sbo-cache:/var/cache/sbopkg \
+            -v "$PWD/out:/output" \
+            -e REPO_NAME=local -e REPO_BRANCH=local \
+            ghcr.io/perrin4869/slackbuilds:15.0 \
+            bash -lc '
+              set -euo pipefail
+              cd /var/lib/sbopkg/local/local
+              sbolint "${{ steps.meta.outputs.category }}/${{ steps.meta.outputs.prgnam }}"
+              sqg -p "${{ steps.meta.outputs.prgnam }}"
+              sbopkg -B -e stop -i "${{ steps.meta.outputs.prgnam }}"
+              pkg="$(ls /tmp/${{ steps.meta.outputs.prgnam }}-*.tgz | head -1)"
+              sbopkglint "$pkg"
+              cp "$pkg" /output/
+            ' 2>&1 | tee build-log.txt
+
+      - name: Upload build log + package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ steps.meta.outputs.prgnam }}
+          path: |
+            build-log.txt
+            out/*.tgz
+          retention-days: 7
+          if-no-files-found: ignore

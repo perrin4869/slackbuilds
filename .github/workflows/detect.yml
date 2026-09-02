@@ -1,0 +1,133 @@
+---
+name: Detect updates
+
+on:
+  repository_dispatch:
+    types: [upstream-release]
+  schedule:
+    # Daily backstop - catches anything the newreleases.io webhook missed,
+    # and is the only mechanism for sources it doesn't cover (wofi/sr.ht,
+    # libtraceevent/kernel.org).
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Single package to check (PRGNAM); all packages if empty'
+        required: false
+
+concurrency:
+  group: detect
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-newreleases:
+    name: Sync newreleases.io tracked projects
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.package == ''
+    continue-on-error: true # advisory only - never block detection on this
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash scripts/newreleases-sync.sh
+        env:
+          NEWRELEASES_API_KEY: ${{ secrets.NEWRELEASES_API_KEY }}
+          NEWRELEASES_WEBHOOK_ID: ${{ secrets.NEWRELEASES_WEBHOOK_ID }}
+
+  detect-image-deps:
+    name: Detect sbopkg release
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.package == ''
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/detect-image-deps.sh
+
+  detect:
+    name: Detect + open update PRs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run detect.sh
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          bash scripts/detect.sh ${{ github.event.inputs.package }} | tee detect-output.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## Update detection'
+            echo
+            echo '| status | package | detail |'
+            echo '|---|---|---|'
+            while IFS=' ' read -r status prgnam rest; do
+              [ -n "$status" ] || continue
+              printf '| %s | %s | %s |\n' "$status" "$prgnam" "$rest"
+            done < detect-output.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open update PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          while read -r status prgnam category version; do
+            [ "$status" = NEEDS_UPDATE ] || continue
+
+            branch="update/${prgnam}-${version}"
+            echo "::group::${prgnam} -> ${version}"
+
+            git fetch origin "$branch" 2>/dev/null && {
+              echo "branch $branch already exists, skipping"
+              echo "::endgroup::"
+              continue
+            }
+
+            upstream_dir="$(mktemp -d)"
+            git clone --quiet --depth 1 --branch master \
+              https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
+            upstream_sha="$(git -C "$upstream_dir" rev-parse HEAD)"
+
+            rm -rf "staging/${category}/${prgnam}"
+            mkdir -p "staging/${category}/${prgnam}"
+            bash scripts/generate.sh "$prgnam" "$version" "$upstream_dir" "staging/${category}/${prgnam}"
+
+            cat > "staging/${category}/${prgnam}/UPDATE.json" <<EOF
+          {
+            "prgnam": "$prgnam",
+            "category": "$category",
+            "version": "$version",
+            "upstream_sha": "$upstream_sha"
+          }
+          EOF
+
+            sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
+
+            git checkout -b "$branch"
+            git add "staging/${category}/${prgnam}" "packages/${prgnam}.conf"
+            git commit -m "${category}/${prgnam}: Updated for version ${version}"
+            git push origin "$branch"
+
+            gh pr create \
+              --title "${category}/${prgnam}: Updated for version ${version}" \
+              --body "Detected upstream update. Merging this PR (after check.yml passes) submits the corresponding PR to SlackBuildsOrg/slackbuilds." \
+              --head "$branch" --base master
+
+            git checkout -
+            rm -rf "$upstream_dir"
+            echo "::endgroup::"
+          done < detect-output.txt

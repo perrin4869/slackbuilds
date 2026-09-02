@@ -1,0 +1,74 @@
+---
+name: Submit upstream
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'staging/**'
+
+concurrency:
+  group: submit
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    name: Discover merged packages
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - id: list
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only HEAD~1 HEAD -- 'staging/*/*/UPDATE.json' \
+            | xargs -r -n1 dirname | sort -u)"
+          json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
+          echo "packages=$json" >> "$GITHUB_OUTPUT"
+
+  submit:
+    name: ${{ matrix.package }}
+    needs: discover
+    if: needs.discover.outputs.packages != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Submit to SlackBuildsOrg/slackbuilds
+        id: submit
+        env:
+          SBO_SUBMIT_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+        run: |
+          set -euo pipefail
+          prgnam="$(basename "${{ matrix.package }}")"
+          version="$(jq -r .version "${{ matrix.package }}/UPDATE.json")"
+          bash scripts/submit.sh "$prgnam" "$version" "${{ matrix.package }}" | tee submit-output.txt
+          echo "result=$(cat submit-output.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Remove staged files
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git rm -r --quiet "${{ matrix.package }}"
+          printf 'chore: remove staged %s after submit\n\n%s\n' \
+            "$(basename "${{ matrix.package }}")" "${{ steps.submit.outputs.result }}" > /tmp/commit-msg.txt
+          git commit -F /tmp/commit-msg.txt
+          # Master may have moved (another matrix job's cleanup commit) -
+          # rebase this cleanup onto it rather than clobbering.
+          for i in 1 2 3 4 5; do
+            git fetch origin master
+            git rebase origin/master && break
+            sleep $((i * 5))
+          done
+          git push origin HEAD:master
