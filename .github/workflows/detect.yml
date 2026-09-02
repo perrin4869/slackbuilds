@@ -4,10 +4,9 @@ name: Detect updates
 on:
   repository_dispatch:
     types: [upstream-release]
-  # No cron backstop: every packages/*.conf right now is SOURCE=github,
-  # which newreleases.io's webhook fully covers. If a non-GitHub source
-  # (wofi/sr.ht, libtraceevent/kernel.org) gets tracked, that's the point
-  # to add one back - newreleases.io doesn't watch those at all.
+  # No cron: this workflow only ever checks webhook-able (github/codeberg)
+  # packages - see "Determine target package" below. Packages with no
+  # webhook option at all (SOURCE=nvchecker) are detect-pull.yml's job.
   workflow_dispatch:
     inputs:
       package:
@@ -37,6 +36,12 @@ jobs:
           PROJECT: ${{ github.event.client_payload.project }}
         run: |
           set -euo pipefail
+          # Every packages/*.conf except SOURCE=nvchecker ones - those have
+          # no webhook option and are detect-pull.yml's job (it doesn't
+          # install nvchecker here, and doesn't need to).
+          all_pushable="$(grep -L '^SOURCE=nvchecker$' packages/*.conf \
+            | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
+
           if [ -n "${{ github.event.inputs.package }}" ]; then
             package="${{ github.event.inputs.package }}"
           elif [ -n "$PROJECT" ]; then
@@ -45,10 +50,11 @@ jobs:
             if [ -n "$package" ]; then
               echo "webhook names $PROJECT -> scoping to $package"
             else
-              echo "webhook names $PROJECT, no packages/*.conf matches it - checking everything"
+              echo "webhook names $PROJECT, no packages/*.conf matches it - checking everything pushable"
+              package="$all_pushable"
             fi
           else
-            package=""
+            package="$all_pushable"
           fi
           echo "package=$package" >> "$GITHUB_OUTPUT"
 
@@ -77,56 +83,4 @@ jobs:
       - name: Open update PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          while read -r status prgnam category version; do
-            [ "$status" = NEEDS_UPDATE ] || continue
-
-            branch="update/${prgnam}-${version}"
-            echo "::group::${prgnam} -> ${version}"
-
-            git fetch origin "$branch" 2>/dev/null && {
-              echo "branch $branch already exists, skipping"
-              echo "::endgroup::"
-              continue
-            }
-
-            upstream_dir="$(mktemp -d)"
-            git clone --quiet --depth 1 --branch master \
-              https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
-            upstream_sha="$(git -C "$upstream_dir" rev-parse HEAD)"
-
-            rm -rf "${category}/${prgnam}"
-            mkdir -p "${category}/${prgnam}"
-            bash scripts/generate.sh "$prgnam" "$version" "$upstream_dir" "${category}/${prgnam}"
-
-            bash scripts/preview.sh "$prgnam" "$version" > /tmp/pr-body.md
-
-            cat > "${category}/${prgnam}/UPDATE.json" <<EOF
-          {
-            "prgnam": "$prgnam",
-            "category": "$category",
-            "version": "$version",
-            "upstream_sha": "$upstream_sha"
-          }
-          EOF
-
-            sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
-
-            git checkout -b "$branch"
-            git add "${category}/${prgnam}" "packages/${prgnam}.conf"
-            git commit -m "${category}/${prgnam}: Updated for version ${version}"
-            git push origin "$branch"
-
-            gh pr create \
-              --title "${category}/${prgnam}: Updated for version ${version}" \
-              --body-file /tmp/pr-body.md \
-              --head "$branch" --base master
-
-            git checkout -
-            rm -rf "$upstream_dir"
-            echo "::endgroup::"
-          done < detect-output.txt
+        run: bash scripts/open-update-prs.sh detect-output.txt

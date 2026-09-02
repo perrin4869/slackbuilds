@@ -28,6 +28,7 @@ die() { log "error: $*"; exit 1; }
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= GITHUB_REPO= CODEBERG_REPO= CGIT_URL= SRHT_REPO= \
+        NVCHECKER_URL= NVCHECKER_REGEX= \
         TAG_REGEX= GENERATOR= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
     # shellcheck disable=SC1090
     source "$conf"
@@ -203,6 +204,42 @@ resolve_sourcehut_hg_version() {
         | grep -E "$regex" \
         | sed -E "s/$regex/\\1/" \
         | sort -V | tail -1
+}
+
+# --- nvchecker version resolution (pull-based packages) ----------------
+
+# nvchecker's `regex` source: fetch $url, apply $regex directly against the
+# page, take the max (by nvchecker's own version sort) of every match's
+# capture group. Used for SOURCE=nvchecker packages tracked by
+# detect-pull.yml - a maintained tool instead of another bespoke scraper,
+# for packages where we're not already committed to one (see
+# resolve_kernel_cgit_version / resolve_sourcehut_hg_version above, which
+# stay as-is where already in use).
+#
+# $regex is written into the TOML as a triple-single-quoted literal
+# string (no escaping of any kind, including embedded quote characters)
+# rather than interpolated into a shell command - avoids the same class of
+# quoting problems as CGIT_URL-style scraping without needing $regex
+# itself to avoid quote characters (though in practice ours do, since they
+# match version characters directly rather than "everything until a
+# quote").
+resolve_nvchecker_version() {
+    local url="$1" regex="$2" workdir
+    workdir="$(mktemp -d)"
+    cat > "$workdir/config.toml" <<TOML
+[__config__]
+oldver = "$workdir/old.json"
+newver = "$workdir/new.json"
+
+[pkg]
+source = "regex"
+url = '''$url'''
+regex = '''$regex'''
+TOML
+    echo '{}' > "$workdir/old.json"
+    nvchecker -c "$workdir/config.toml" >/dev/null 2>&1 || true
+    jq -r '.data.pkg.version // empty' "$workdir/new.json" 2>/dev/null
+    rm -rf "$workdir"
 }
 
 # --- misc -------------------------------------------------------------

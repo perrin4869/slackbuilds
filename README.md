@@ -57,15 +57,14 @@ upstream moved in the meantime.
   upstream checkout at a target version.
 - `scripts/preview.sh` - renders the PR body: the commit message
   `submit.yml` will use and a note about the merge-time re-derivation.
+- `scripts/open-update-prs.sh` - given `detect.sh`'s output, generates and
+  opens an update PR for every `NEEDS_UPDATE` line. Shared by `detect.yml`
+  and `detect-pull.yml` - opening a PR is the same step regardless of how
+  the update was found.
 - `scripts/submit.sh` - re-derives and pushes the upstream PR.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
   for Rust packages (originally run by hand; see `scripts/generate.sh`'s
   `rust`/`rust64` case for the invocation).
-- `scripts/detect-image-deps.sh` - tracks the image's own build-time
-  dependencies (sbopkg, sbo-maintainer-tools), separate from SBo package
-  detection - see "Image" below.
-- `image/sbo-maintainer-tools.version` - last version `detect-image-deps.sh`
-  dispatched a rebuild for; not consulted by the build itself.
 - `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild` at
   its real upstream path (e.g. `libraries/tree-sitter/`), plus an
   `UPDATE.json` recording the pending version/upstream SHA. **Kept, not
@@ -91,10 +90,23 @@ capture group 1.
 md5, done) and only needs to be set explicitly for `rust`/`rust64` (crate
 list regenerated via `scripts/rust-info.sh`/`rust64-info.sh`).
 
-`SOURCE` selects how the latest version is resolved: `github` (needs
-`GITHUB_REPO`), `codeberg` (needs `CODEBERG_REPO`), `kernel-cgit` (needs
-`CGIT_URL`, e.g. `libtraceevent`), or `sourcehut-hg` (needs `SRHT_REPO`,
-e.g. `~scoopta/wofi` for `wofi`). All four take the same `TAG_REGEX`.
+`SOURCE` selects how the latest version is resolved:
+
+- `github` (needs `GITHUB_REPO`) or `codeberg` (needs `CODEBERG_REPO`) -
+  webhook-able via newreleases.io, checked by `detect.yml`. Both take
+  `TAG_REGEX` (anchored, capture group 1 = version).
+- `nvchecker` (needs `NVCHECKER_URL` + `NVCHECKER_REGEX`, [nvchecker](https://github.com/lilydjwg/nvchecker)'s
+  `regex` source fields exactly - fetch the URL, take the max of every
+  match of the regex) - for sources with no API at all (hg.sr.ht,
+  cgit instances), so no webhook is possible. Checked by `detect-pull.yml`
+  on a cron instead. `wofi`/`libtraceevent` are the current examples.
+
+`kernel-cgit` (needs `CGIT_URL`) and `sourcehut-hg` (needs `SRHT_REPO`)
+also exist as bespoke-scraper alternatives to `nvchecker` (see
+`scripts/lib.sh`) - not currently used by any `packages/*.conf`, but kept
+since `image-deps.yml` uses the cgit one directly for a non-SBo-package
+dependency (see "Image" below), and either avoids the Python/nvchecker
+dependency if that's ever preferred for a new package.
 
 Freezing a package (e.g. blocked on a Slackware/glibc version) adds:
 
@@ -122,8 +134,10 @@ precisely because raw upstream signals (test tags, LTS backports, etc.)
 aren't trustworthy on their own; the webhook only saves re-checking
 *every other* package. If the payload is missing or names a project no
 `.conf` matches (manual dispatch with no `package` input, or a
-misconfigured webhook), it falls back to checking every package - the
-same behavior as before this scoping existed.
+misconfigured webhook), it falls back to checking every *webhook-able*
+(`github`/`codeberg`) package - excluding `SOURCE=nvchecker` ones, which
+have no webhook option at all and are `detect-pull.yml`'s job instead
+(below).
 
 **Webhook payload template** (newreleases.io → your webhook → payload
 fields), since the default payload doesn't reach GitHub in a form it
@@ -144,16 +158,24 @@ below:
 matching the `GITHUB_REPO`/`CODEBERG_REPO` value in that package's
 `.conf` file exactly.
 
-No cron backstop: every `packages/*.conf` right now is `SOURCE=github`,
-which newreleases.io's webhook fully covers. If a non-GitHub source
-(wofi/sr.ht, libtraceevent/kernel.org) ever gets tracked, that's the point
-to add a cron back - newreleases.io doesn't watch those at all, so nothing
-else would ever trigger detection for them.
+No cron here: every package `detect.yml` handles is webhook-covered. The
+one place a cron actually belongs is `detect-pull.yml`, split out for
+exactly the packages a webhook *can't* reach:
 
-This is deliberately a separate workflow from `detect-image-deps.yml`
-(below) - SBo package detection and image build-dependency detection are
-unrelated concerns that happen to share a similar "check a version, act on
-it" shape, not one job.
+- **`detect-pull.yml`** (weekly cron + `workflow_dispatch`) checks every
+  `SOURCE=nvchecker` package - `wofi` (hg.sr.ht) and `libtraceevent`
+  (git.kernel.org/cgit) currently. Neither hosts an API of any kind for a
+  service like newreleases.io to watch, so polling is the only option.
+  It installs [nvchecker](https://github.com/lilydjwg/nvchecker) itself,
+  finds the pull-based packages by grepping `packages/*.conf` for
+  `SOURCE=nvchecker`, then reuses the exact same `detect.sh` +
+  `scripts/open-update-prs.sh` as `detect.yml` - push vs. pull only
+  changes *how a package's turn to be checked comes up*, not what happens
+  once it is.
+
+This push/pull split mirrors `image.yml`/`image-deps.yml`'s (below) -
+detection workflows are separated by trigger mechanism, not bundled by
+"they're all detection" convenience.
 
 `sync-newreleases.yml` reconciles the tracked-project list on
 newreleases.io with `packages/*.conf`, so adding a package here doesn't
@@ -191,24 +213,29 @@ checking at all and is meant for exactly this - a manually-populated tree.
 `ghcr.io/perrin4869/slackbuilds:15.0`, built by `image.yml` on every
 `Dockerfile` change and monthly (to pick up Slackware package updates).
 
-`detect-image-deps.yml` (weekly cron + `workflow_dispatch` - no webhook
-option exists for either dependency, see below) runs
-`scripts/detect-image-deps.sh` for the image's two build-time dependencies,
-which are tracked differently because one is pinned and one isn't:
+`image-deps.yml` (weekly cron + `workflow_dispatch` - no webhook option
+exists for either dependency) has two independent jobs, one per
+build-time dependency, tracked differently because one is pinned and one
+isn't:
 
-- **sbopkg** is pinned via the Dockerfile's `SBOPKG_VERSION` ARG, fetched
-  from a specific GitHub release. A new release opens a PR bumping it;
-  merging triggers a rebuild via `image.yml`'s `Dockerfile`-change trigger.
-- **sbo-maintainer-tools** has no pin - the Dockerfile just installs
-  whatever `sbopkg -B -i sbo-maintainer-tools` finds in the currently-synced
-  SBo mirror at build time, so there's no Dockerfile line to bump and no
-  diff to review. A new release just needs a rebuild: the script commits
-  the new version to `image/sbo-maintainer-tools.version` (purely to avoid
-  redispatching one on every run) and directly dispatches `image.yml`.
+- **`sbopkg`** is pinned via the Dockerfile's `SBOPKG_VERSION` ARG,
+  fetched from a specific GitHub release - `newreleases.io` *could* watch
+  it (it's on GitHub) but doesn't, to keep both dependencies on one
+  schedule rather than splitting further. A new release opens a PR
+  bumping the ARG; merging triggers a rebuild via `image.yml`'s
+  `Dockerfile`-change trigger.
+- **`sbo-maintainer-tools`** has no pin - the Dockerfile just installs
+  whatever `sbopkg -B -i sbo-maintainer-tools` finds in the
+  currently-synced SBo mirror at build time, so there's no Dockerfile line
+  to bump and no diff to review. It's hosted on the maintainer's own cgit
+  instance, which - like `git.kernel.org` - has no API at all, only HTML
+  to scrape (`scripts/lib.sh`'s `resolve_kernel_cgit_version`, shared with
+  the same function `image-deps.yml` uses here). A new release just needs
+  a rebuild: the job compares against what's *actually installed in the
+  published image* (`docker run ghcr.io/perrin4869/slackbuilds:15.0
+  sbolint --version`, which prints sbo-maintainer-tools' own bundled
+  version) rather than a separately-tracked state file that could drift
+  from reality, then directly dispatches `image.yml` if it's behind.
 
-Both are hosted somewhere `newreleases.io` can't watch as a webhook:
-sbopkg *could* be (it's on GitHub) but isn't, to keep both dependencies on
-one schedule; sbo-maintainer-tools is on the maintainer's own cgit
-instance, which - like `git.kernel.org` - has no API at all, only HTML to
-scrape (`scripts/lib.sh`'s `resolve_kernel_cgit_version`, shared with
-`libtraceevent`).
+Both jobs are inlined directly in `image-deps.yml` rather than calling a
+shared script, since each is only ever invoked from its own one job.

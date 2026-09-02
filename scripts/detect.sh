@@ -1,9 +1,11 @@
 #!/bin/bash
-# Resolve the latest valid upstream version for one or all tracked packages.
+# Resolve the latest valid upstream version for one, several, or all
+# tracked packages.
 #
 # Usage:
-#   scripts/detect.sh                 # all packages/*.conf
-#   scripts/detect.sh tree-sitter     # a single package by PRGNAM
+#   scripts/detect.sh                       # all packages/*.conf
+#   scripts/detect.sh tree-sitter           # a single package by PRGNAM
+#   scripts/detect.sh tree-sitter jujutsu   # exactly these packages
 #
 # For each package, prints one line to stdout:
 #   NEEDS_UPDATE <prgnam> <category> <new_version>   an update PR should be opened
@@ -50,6 +52,11 @@ resolve_latest() {
             [ -n "${SRHT_REPO:-}" ] || die "$PRGNAM: SOURCE=sourcehut-hg but SRHT_REPO not set"
             [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=sourcehut-hg but TAG_REGEX not set"
             resolve_sourcehut_hg_version "$SRHT_REPO" "$TAG_REGEX"
+            ;;
+        nvchecker)
+            [ -n "${NVCHECKER_URL:-}" ] || die "$PRGNAM: SOURCE=nvchecker but NVCHECKER_URL not set"
+            [ -n "${NVCHECKER_REGEX:-}" ] || die "$PRGNAM: SOURCE=nvchecker but NVCHECKER_REGEX not set"
+            resolve_nvchecker_version "$NVCHECKER_URL" "$NVCHECKER_REGEX"
             ;;
         *)
             log "warn: $PRGNAM: no version resolver implemented for SOURCE=$conf_source"
@@ -99,10 +106,12 @@ check_one() {
     echo "NEEDS_UPDATE $PRGNAM $CATEGORY $latest"
 }
 
-if [ $# -eq 1 ]; then
-    conf="packages/$1.conf"
-    [ -f "$conf" ] || die "no such package config: $conf"
-    check_one "$conf"
+if [ $# -ge 1 ]; then
+    for prgnam in "$@"; do
+        conf="packages/$prgnam.conf"
+        [ -f "$conf" ] || die "no such package config: $conf"
+        check_one "$conf"
+    done
 else
     for conf in packages/*.conf; do
         [ -e "$conf" ] || continue

@@ -1,0 +1,62 @@
+---
+name: Detect updates (pull)
+
+on:
+  schedule:
+    # The only packages checked here (SOURCE=nvchecker) have no webhook
+    # option at all - hg.sr.ht and git.kernel.org (cgit) expose no API for
+    # newreleases.io, or anything else, to watch. Polling is the only way.
+    - cron: '35 7 * * 1' # weekly - these change rarely
+  workflow_dispatch: {}
+
+concurrency:
+  group: detect-pull
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  detect-pull:
+    name: Detect + open update PRs (SOURCE=nvchecker)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install nvchecker
+        run: pip install --break-system-packages nvchecker
+
+      - name: List pull-based packages
+        id: list
+        run: |
+          set -euo pipefail
+          packages="$(grep -l '^SOURCE=nvchecker$' packages/*.conf \
+            | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Run detect.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          bash scripts/detect.sh ${{ steps.list.outputs.packages }} | tee detect-output.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## Update detection (pull)'
+            echo
+            echo '| status | package | detail |'
+            echo '|---|---|---|'
+            while IFS=' ' read -r status prgnam rest; do
+              [ -n "$status" ] || continue
+              printf '| %s | %s | %s |\n' "$status" "$prgnam" "$rest"
+            done < detect-output.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open update PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/open-update-prs.sh detect-output.txt

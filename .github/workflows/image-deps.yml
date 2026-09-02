@@ -1,0 +1,103 @@
+---
+name: Detect image dependency updates
+
+on:
+  schedule:
+    # sbo-maintainer-tools is hosted on a self-run cgit instance with no
+    # API and no webhook of any kind - polling is the only option. sbopkg
+    # (GitHub) rides along here too rather than getting its own trigger,
+    # since both are "the image's build-time dependencies" as one concern,
+    # separate from SBo package detection (see detect.yml).
+    - cron: '5 7 * * 1' # weekly - these change rarely
+  workflow_dispatch: {}
+
+concurrency:
+  group: image-deps
+  cancel-in-progress: false
+
+jobs:
+  sbopkg:
+    name: sbopkg
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # sbopkg is pinned via the Dockerfile's SBOPKG_VERSION ARG, fetched
+      # from a specific GitHub release - so a new release opens a PR
+      # bumping it; merging triggers image.yml's Dockerfile-change trigger.
+      - name: Check for a new sbopkg release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          current="$(sed -n 's/^ARG SBOPKG_VERSION="\(.*\)"$/\1/p' Dockerfile)"
+          [ -n "$current" ] || die "couldn't find ARG SBOPKG_VERSION=\"...\" in Dockerfile"
+
+          latest="$(resolve_github_version sbopkg/sbopkg '^([0-9]+\.[0-9]+\.[0-9]+)$')"
+          if [ -z "$latest" ] || ! version_gt "$latest" "$current"; then
+            echo "up to date: $current"
+            exit 0
+          fi
+
+          branch="image/sbopkg-${latest}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "branch $branch already open"
+            exit 0
+          fi
+
+          sed -i "s/^ARG SBOPKG_VERSION=\".*\"$/ARG SBOPKG_VERSION=\"${latest}\"/" Dockerfile
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add Dockerfile
+          git commit --quiet -m "Dockerfile: bump sbopkg to ${latest}"
+          git push --quiet origin "HEAD:refs/heads/${branch}"
+
+          gh pr create \
+            --title "Dockerfile: bump sbopkg to ${latest}" \
+            --body "sbopkg ${latest} released (was ${current}). Merging rebuilds and pushes ghcr.io/perrin4869/slackbuilds:15.0 automatically." \
+            --head "$branch" --base master
+
+  sbo-maintainer-tools:
+    name: sbo-maintainer-tools
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write # to dispatch image.yml directly
+    steps:
+      - uses: actions/checkout@v5
+
+      # sbo-maintainer-tools has no version pin - the Dockerfile just
+      # installs whatever `sbopkg -B -i sbo-maintainer-tools` finds in the
+      # synced SBo mirror at build time, so there's no line to bump and no
+      # diff to review. Compares against what's actually installed in the
+      # published image (not a separately-tracked state file, which could
+      # drift from reality if a rebuild ever failed or was done by hand) -
+      # sbolint prints its own $VERSION verbatim with no other text.
+      - name: Check for a new sbo-maintainer-tools release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          docker pull --quiet ghcr.io/perrin4869/slackbuilds:15.0
+          current="$(docker run --rm ghcr.io/perrin4869/slackbuilds:15.0 sbolint --version)"
+
+          latest="$(resolve_kernel_cgit_version \
+            "https://slackware.uk/~urchlay/repos/sbo-maintainer-tools" \
+            '^([0-9]+(\.[0-9]+)+)$')"
+
+          if [ -z "$latest" ] || ! version_gt "$latest" "$current"; then
+            echo "up to date: $current"
+            exit 0
+          fi
+
+          echo "sbo-maintainer-tools $latest released (image has $current) - dispatching rebuild"
+          gh workflow run image.yml --ref master
