@@ -103,13 +103,17 @@ in the run summary, so they don't rot silently.
 
 ## Detection
 
-`detect.yml` runs on a `repository_dispatch: upstream-release` event (fired
+`detect.yml` runs on a `repository_dispatch: upstream-release` event, fired
 by a [newreleases.io](https://newreleases.io/) webhook watching each
-tracked project) and on a daily cron backstop. The webhook is a trigger
-only - it carries no version info, so every firing just re-runs
-`detect.sh` over every package. The cron backstop exists because
-newreleases.io doesn't cover every source this repo tracks (sr.ht Mercurial,
-kernel.org cgit) and because a webhook can be silently dropped.
+tracked project, or manually via `workflow_dispatch`. The webhook is a
+trigger only - it carries no version info, so every firing just re-runs
+`detect.sh` over every package.
+
+No cron backstop: every `packages/*.conf` right now is `SOURCE=github`,
+which newreleases.io's webhook fully covers. If a non-GitHub source
+(wofi/sr.ht, libtraceevent/kernel.org) ever gets tracked, that's the point
+to add a cron back - newreleases.io doesn't watch those at all, so nothing
+else would ever trigger detection for them.
 
 `scripts/newreleases-sync.sh` reconciles the tracked-project list on
 newreleases.io from `packages/*.conf`, so a new package only needs a
