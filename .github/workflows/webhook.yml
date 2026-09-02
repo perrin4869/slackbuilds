@@ -1,12 +1,15 @@
 ---
-name: Detect updates (push)
+name: Release webhook
 
 on:
+  # We don't detect anything here - newreleases.io already did that and
+  # is telling us via webhook. See "Determine target package" below for
+  # what we still have to verify ourselves even so.
   repository_dispatch:
     types: [upstream-release]
   # No cron: this workflow only ever checks webhook-able (github/codeberg)
   # packages - see "Determine target package" below. Packages with no
-  # webhook option at all (SOURCE=nvchecker) are detect-pull.yml's job.
+  # webhook option at all (SOURCE=nvchecker) are poll.yml's job.
   workflow_dispatch:
     inputs:
       package:
@@ -14,7 +17,7 @@ on:
         required: false
 
 concurrency:
-  group: detect-push
+  group: webhook
   cancel-in-progress: false
 
 permissions:
@@ -22,8 +25,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  detect-push:
-    name: Detect (push) + open update PRs
+  webhook:
+    name: React to release webhook + open update PRs
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -37,9 +40,9 @@ jobs:
         run: |
           set -euo pipefail
           # Every packages/*.conf except SOURCE=nvchecker ones - those have
-          # no webhook option and are detect-pull.yml's job (it doesn't
-          # install nvchecker here, and doesn't need to).
-          all_pushable="$(grep -L '^SOURCE=nvchecker$' packages/*.conf \
+          # no webhook option and are poll.yml's job (it doesn't install
+          # nvchecker here, and doesn't need to).
+          all_webhookable="$(grep -L '^SOURCE=nvchecker$' packages/*.conf \
             | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
 
           if [ -n "${{ github.event.inputs.package }}" ]; then
@@ -50,11 +53,11 @@ jobs:
             if [ -n "$package" ]; then
               echo "webhook names $PROJECT -> scoping to $package"
             else
-              echo "webhook names $PROJECT, no packages/*.conf matches it - checking everything pushable"
-              package="$all_pushable"
+              echo "webhook names $PROJECT, no packages/*.conf matches it - checking everything webhook-able"
+              package="$all_webhookable"
             fi
           else
-            package="$all_pushable"
+            package="$all_webhookable"
           fi
           echo "package=$package" >> "$GITHUB_OUTPUT"
 
@@ -70,7 +73,7 @@ jobs:
         if: always()
         run: |
           {
-            echo '## Update detection (push)'
+            echo '## Release webhook'
             echo
             echo '| status | package | detail |'
             echo '|---|---|---|'

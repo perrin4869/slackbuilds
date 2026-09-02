@@ -211,7 +211,7 @@ resolve_sourcehut_hg_version() {
 # nvchecker's `regex` source: fetch $url, apply $regex directly against the
 # page, take the max (by nvchecker's own version sort) of every match's
 # capture group. Used for SOURCE=nvchecker packages tracked by
-# detect-pull.yml - a maintained tool instead of another bespoke scraper,
+# poll.yml - a maintained tool instead of another bespoke scraper,
 # for packages where we're not already committed to one (see
 # resolve_kernel_cgit_version / resolve_sourcehut_hg_version above, which
 # stay as-is where already in use).

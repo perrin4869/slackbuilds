@@ -7,7 +7,7 @@ lints them, and - once a human merges the resulting PR here - opens the real
 PR upstream.
 
 ```
-upstream release ──▶ detect-push.yml opens a PR here (<category>/<pkg>/)
+upstream release ──▶ webhook.yml opens a PR here (<category>/<pkg>/)
                           │
                           ▼
                     check.yml: sbolint + sbopkg -B -i + sbopkglint,
@@ -58,8 +58,8 @@ upstream moved in the meantime.
 - `scripts/preview.sh` - renders the PR body: the commit message
   `submit.yml` will use and a note about the merge-time re-derivation.
 - `scripts/open-update-prs.sh` - given `detect.sh`'s output, generates and
-  opens an update PR for every `NEEDS_UPDATE` line. Shared by `detect-push.yml`
-  and `detect-pull.yml` - opening a PR is the same step regardless of how
+  opens an update PR for every `NEEDS_UPDATE` line. Shared by `webhook.yml`
+  and `poll.yml` - opening a PR is the same step regardless of how
   the update was found.
 - `scripts/submit.sh` - re-derives and pushes the upstream PR.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
@@ -93,12 +93,12 @@ list regenerated via `scripts/rust-info.sh`/`rust64-info.sh`).
 `SOURCE` selects how the latest version is resolved:
 
 - `github` (needs `GITHUB_REPO`) or `codeberg` (needs `CODEBERG_REPO`) -
-  webhook-able via newreleases.io, checked by `detect-push.yml`. Both take
+  webhook-able via newreleases.io, checked by `webhook.yml`. Both take
   `TAG_REGEX` (anchored, capture group 1 = version).
 - `nvchecker` (needs `NVCHECKER_URL` + `NVCHECKER_REGEX`, [nvchecker](https://github.com/lilydjwg/nvchecker)'s
   `regex` source fields exactly - fetch the URL, take the max of every
   match of the regex) - for sources with no API at all (hg.sr.ht,
-  cgit instances), so no webhook is possible. Checked by `detect-pull.yml`
+  cgit instances), so no webhook is possible. Checked by `poll.yml`
   on a cron instead. `wofi`/`libtraceevent` are the current examples.
 
 `kernel-cgit` (needs `CGIT_URL`) and `sourcehut-hg` (needs `SRHT_REPO`)
@@ -120,7 +120,7 @@ in the run summary, so they don't rot silently.
 
 ## Detection
 
-`detect-push.yml` runs on a `repository_dispatch: upstream-release` event, fired
+`webhook.yml` runs on a `repository_dispatch: upstream-release` event, fired
 by a [newreleases.io](https://newreleases.io/) webhook watching each
 tracked project, or manually via `workflow_dispatch`.
 
@@ -136,7 +136,7 @@ aren't trustworthy on their own; the webhook only saves re-checking
 `.conf` matches (manual dispatch with no `package` input, or a
 misconfigured webhook), it falls back to checking every *webhook-able*
 (`github`/`codeberg`) package - excluding `SOURCE=nvchecker` ones, which
-have no webhook option at all and are `detect-pull.yml`'s job instead
+have no webhook option at all and are `poll.yml`'s job instead
 (below).
 
 **Webhook payload template** (newreleases.io → your webhook → payload
@@ -158,18 +158,18 @@ below:
 matching the `GITHUB_REPO`/`CODEBERG_REPO` value in that package's
 `.conf` file exactly.
 
-No cron here: every package `detect-push.yml` handles is webhook-covered. The
-one place a cron actually belongs is `detect-pull.yml`, split out for
+No cron here: every package `webhook.yml` handles is webhook-covered. The
+one place a cron actually belongs is `poll.yml`, split out for
 exactly the packages a webhook *can't* reach:
 
-- **`detect-pull.yml`** (weekly cron + `workflow_dispatch`) checks every
+- **`poll.yml`** (weekly cron + `workflow_dispatch`) checks every
   `SOURCE=nvchecker` package - `wofi` (hg.sr.ht) and `libtraceevent`
   (git.kernel.org/cgit) currently. Neither hosts an API of any kind for a
   service like newreleases.io to watch, so polling is the only option.
   It installs [nvchecker](https://github.com/lilydjwg/nvchecker) itself,
-  finds the pull-based packages by grepping `packages/*.conf` for
+  finds the poll-based packages by grepping `packages/*.conf` for
   `SOURCE=nvchecker`, then reuses the exact same `detect.sh` +
-  `scripts/open-update-prs.sh` as `detect-push.yml` - push vs. pull only
+  `scripts/open-update-prs.sh` as `webhook.yml` - push vs. pull only
   changes *how a package's turn to be checked comes up*, not what happens
   once it is.
 
@@ -180,7 +180,7 @@ detection workflows are separated by trigger mechanism, not bundled by
 `sync-newreleases.yml` reconciles the tracked-project list on
 newreleases.io with `packages/*.conf`, so adding a package here doesn't
 also mean remembering to add it on their site. It's a *third*, separate
-workflow, not a step in `detect-push.yml`: newreleases.io doesn't track "what
+workflow, not a step in `webhook.yml`: newreleases.io doesn't track "what
 this repo currently ships" at all - it independently watches each
 project's upstream repo for new releases, regardless of what we've merged
 - so there's nothing to tell it after a version-bump PR merges. The only

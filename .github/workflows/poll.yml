@@ -1,5 +1,5 @@
 ---
-name: Detect updates (pull)
+name: Poll for updates
 
 on:
   schedule:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: detect-pull
+  group: poll
   cancel-in-progress: false
 
 permissions:
@@ -18,8 +18,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  detect-pull:
-    name: Detect + open update PRs (SOURCE=nvchecker)
+  poll:
+    name: Poll + open update PRs (SOURCE=nvchecker)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -27,7 +27,7 @@ jobs:
       - name: Install nvchecker
         run: pip install --break-system-packages nvchecker
 
-      - name: List pull-based packages
+      - name: List poll-based packages
         id: list
         run: |
           set -euo pipefail
@@ -46,7 +46,7 @@ jobs:
         if: always()
         run: |
           {
-            echo '## Update detection (pull)'
+            echo '## Poll results'
             echo
             echo '| status | package | detail |'
             echo '|---|---|---|'
