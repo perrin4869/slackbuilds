@@ -36,6 +36,21 @@ resolve_latest() {
             [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=github but TAG_REGEX not set"
             resolve_github_version "$GITHUB_REPO" "$TAG_REGEX"
             ;;
+        codeberg)
+            [ -n "${CODEBERG_REPO:-}" ] || die "$PRGNAM: SOURCE=codeberg but CODEBERG_REPO not set"
+            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=codeberg but TAG_REGEX not set"
+            resolve_codeberg_version "$CODEBERG_REPO" "$TAG_REGEX"
+            ;;
+        kernel-cgit)
+            [ -n "${CGIT_URL:-}" ] || die "$PRGNAM: SOURCE=kernel-cgit but CGIT_URL not set"
+            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=kernel-cgit but TAG_REGEX not set"
+            resolve_kernel_cgit_version "$CGIT_URL" "$TAG_REGEX"
+            ;;
+        sourcehut-hg)
+            [ -n "${SRHT_REPO:-}" ] || die "$PRGNAM: SOURCE=sourcehut-hg but SRHT_REPO not set"
+            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=sourcehut-hg but TAG_REGEX not set"
+            resolve_sourcehut_hg_version "$SRHT_REPO" "$TAG_REGEX"
+            ;;
         *)
             log "warn: $PRGNAM: no version resolver implemented for SOURCE=$conf_source"
             ;;

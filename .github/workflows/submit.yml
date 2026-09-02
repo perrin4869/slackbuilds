@@ -55,17 +55,26 @@ jobs:
           bash scripts/submit.sh "$prgnam" "$version" "${{ matrix.package }}" | tee submit-output.txt
           echo "result=$(cat submit-output.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Remove staged files
+      - name: Commit drift correction, if any
+        # scripts/submit.sh syncs staging/<pkg>/ to the fresh copy it
+        # actually submitted (not the possibly-stale reviewed copy) and
+        # leaves it in place - it's the diff baseline for this package's
+        # *next* update PR, not a one-off review artifact. Usually nothing
+        # changed (no drift), so there's nothing to commit.
         run: |
           set -euo pipefail
+          if git diff --quiet -- "${{ matrix.package }}"; then
+            echo "no drift - staging/ already matched what was submitted"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git rm -r --quiet "${{ matrix.package }}"
-          printf 'chore: remove staged %s after submit\n\n%s\n' \
+          git add "${{ matrix.package }}"
+          printf 'chore: sync staged %s to what was actually submitted\n\n%s\n' \
             "$(basename "${{ matrix.package }}")" "${{ steps.submit.outputs.result }}" > /tmp/commit-msg.txt
           git commit -F /tmp/commit-msg.txt
-          # Master may have moved (another matrix job's cleanup commit) -
-          # rebase this cleanup onto it rather than clobbering.
+          # Master may have moved (another matrix job's commit) - rebase
+          # this one onto it rather than clobbering.
           for i in 1 2 3 4 5; do
             git fetch origin master
             git rebase origin/master && break

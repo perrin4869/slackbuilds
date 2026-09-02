@@ -52,7 +52,7 @@ archive="$(subst_version "$ARCHIVE" "$version")"
 prgdir="$(subst_version "$PRGDIR" "$version")"
 
 case "$GENERATOR" in
-    simple)
+    tarball)
         homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
         requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
         maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"

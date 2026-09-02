@@ -72,6 +72,12 @@ done
 pkg_dir="$workdir/upstream/${CATEGORY}/${PRGNAM}"
 cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
 
+# staging_dir is kept (not deleted) as the diff baseline for this package's
+# *next* update PR - synced to the fresh copy, not the possibly-drifted
+# reviewed one, so that baseline always reflects what was actually
+# submitted. The caller (submit.yml) commits this only if it changed.
+cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$staging_dir/"
+
 commit_msg="${CATEGORY}/${PRGNAM}: Updated for version ${version}"
 branch="${PRGNAM}/${version}"
 

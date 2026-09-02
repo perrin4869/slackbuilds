@@ -37,18 +37,33 @@ as what got reviewed.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
   for Rust packages (originally run by hand; see `scripts/generate.sh`'s
   `rust`/`rust64` case for the invocation).
-- `staging/<category>/<prgnam>/` - transient: the regenerated files for an
-  open update PR, removed by `submit.yml` once submitted upstream.
+- `staging/<category>/<prgnam>/` - the regenerated `.info`/`.SlackBuild` for a
+  package's last-detected update. **Kept, not deleted, after submission** -
+  it's the diff baseline for that package's *next* update PR, so the PR diff
+  shows exactly what changed (which crates got bumped, which `DOWNLOAD`/
+  `MD5SUM` lines moved) instead of a wall of "new file added" green lines
+  each time. `submit.yml` syncs it to the fresh copy it actually submitted
+  (correcting for any drift - see below), not the possibly-stale reviewed
+  copy, so the baseline stays accurate even when upstream moved in between.
 
 ## Adding a package
 
 Add `packages/<prgnam>.conf`. See any existing file for the shape; a plain
 GitHub-tagged, non-Rust package only needs `CATEGORY`, `PRGNAM`, `SOURCE`,
-`GITHUB_REPO`, `TAG_REGEX`, `GENERATOR=simple`, `SRC_URL`/`ARCHIVE`/`PRGDIR`
-templates, and a starting `VERSION`. `TAG_REGEX` matters more than it looks:
-newest-by-date tags are frequently unrelated branches or test tags, so it
-must be an anchored pattern (`^v([0-9]+\.[0-9]+\.[0-9]+)$`) with the version
-in capture group 1.
+`GITHUB_REPO`, `TAG_REGEX`, and `SRC_URL`/`ARCHIVE`/`PRGDIR` templates, plus
+a starting `VERSION`. `TAG_REGEX` matters more than it looks: newest-by-date
+tags are frequently unrelated branches or test tags, so it must be an
+anchored pattern (`^v([0-9]+\.[0-9]+\.[0-9]+)$`) with the version in
+capture group 1.
+
+`GENERATOR` defaults to `tarball` (download the source archive, compute its
+md5, done) and only needs to be set explicitly for `rust`/`rust64` (crate
+list regenerated via `scripts/rust-info.sh`/`rust64-info.sh`).
+
+`SOURCE` selects how the latest version is resolved: `github` (needs
+`GITHUB_REPO`), `codeberg` (needs `CODEBERG_REPO`), `kernel-cgit` (needs
+`CGIT_URL`, e.g. `libtraceevent`), or `sourcehut-hg` (needs `SRHT_REPO`,
+e.g. `~scoopta/wofi` for `wofi`). All four take the same `TAG_REGEX`.
 
 Freezing a package (e.g. blocked on a Slackware/glibc version) adds:
 

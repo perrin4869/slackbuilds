@@ -27,12 +27,15 @@ die() { log "error: $*"; exit 1; }
 # vars from bleeding into the next when looping over all configs.
 load_package_conf() {
     local conf="$1"
-    CATEGORY= PRGNAM= SOURCE= GITHUB_REPO= TAG_REGEX= GENERATOR= \
-        SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
+    CATEGORY= PRGNAM= SOURCE= GITHUB_REPO= CODEBERG_REPO= CGIT_URL= SRHT_REPO= \
+        TAG_REGEX= GENERATOR= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"
     [ -n "$CATEGORY" ] || die "$conf: CATEGORY not set"
+    # Most packages are a single source tarball with no special vendoring -
+    # GENERATOR is only worth naming explicitly for the rust/rust64 case.
+    GENERATOR="${GENERATOR:-tarball}"
 }
 
 # %VERSION% substitution used in SRC_URL / ARCHIVE / PRGDIR templates.
@@ -113,6 +116,73 @@ github_candidate_tags() {
 resolve_github_version() {
     local repo="$1" regex="$2"
     github_candidate_tags "$repo" \
+        | grep -E "$regex" \
+        | sed -E "s/$regex/\\1/" \
+        | sort -V | tail -1
+}
+
+# --- Codeberg-hosted version resolution -------------------------------
+
+# Codeberg's API (Gitea) is shaped like GitHub's: same tags/releases split,
+# same reason for querying both (a project may only ever cut tags). Not
+# paginated beyond one page of 50 - every package this pipeline tracks on
+# Codeberg is small enough that its full tag history fits in one page; if
+# that stops being true, page through the same way resolve_github_version
+# lets `gh --paginate` do it for GitHub.
+codeberg_candidate_tags() {
+    local repo="$1"
+    {
+        curl -sf "https://codeberg.org/api/v1/repos/${repo}/tags?limit=50" \
+            | jq -r '.[].name' 2>/dev/null || true
+        curl -sf "https://codeberg.org/api/v1/repos/${repo}/releases?limit=50" \
+            | jq -r '.[].tag_name' 2>/dev/null || true
+    } | sort -u
+}
+
+resolve_codeberg_version() {
+    local repo="$1" regex="$2"
+    codeberg_candidate_tags "$repo" \
+        | grep -E "$regex" \
+        | sed -E "s/$regex/\\1/" \
+        | sort -V | tail -1
+}
+
+# --- kernel.org cgit version resolution --------------------------------
+
+# cgit has no JSON API; scrape the /refs/ page's "Tag" column, which links
+# to each tag as `.../tag/?h=<tagname>`. Works for any cgit instance, not
+# just kernel.org, in case another package ever needs it.
+cgit_candidate_tags() {
+    local cgit_url="$1"
+    curl -sf "${cgit_url%/}/refs/" \
+        | grep -oE "tag/\?h=[^'\"]+" | sed -E "s#tag/\?h=##" | sort -u
+}
+
+resolve_kernel_cgit_version() {
+    local cgit_url="$1" regex="$2"
+    cgit_candidate_tags "$cgit_url" \
+        | grep -E "$regex" \
+        | sed -E "s/$regex/\\1/" \
+        | sort -V | tail -1
+}
+
+# --- sourcehut Mercurial version resolution ----------------------------
+
+# hg.sr.ht has no API either; scrape the /tags page's archive links
+# (`archive/<tag>.tar.gz`), which is also the exact source-download URL
+# shape SBo uses for these packages. "tip" is Mercurial's alias for the
+# working head, not a real tag - always excluded.
+srht_hg_candidate_tags() {
+    local repo="$1"
+    curl -sf "https://hg.sr.ht/${repo}/tags" \
+        | grep -oE "archive/[^'\"]+\.tar\.gz" \
+        | sed -E 's#archive/(.+)\.tar\.gz#\1#' \
+        | grep -v '^tip$' | sort -u
+}
+
+resolve_sourcehut_hg_version() {
+    local repo="$1" regex="$2"
+    srht_hg_candidate_tags "$repo" \
         | grep -E "$regex" \
         | sed -E "s/$regex/\\1/" \
         | sort -V | tail -1
