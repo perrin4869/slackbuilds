@@ -55,12 +55,21 @@ jobs:
         id: submit
         env:
           SBO_SUBMIT_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+          # SBO_SUBMIT_TOKEN doubles as GH_TOKEN for the whole step (it has
+          # repo scope, so it can read SlackBuildsOrg/slackbuilds fine too) -
+          # upstream_version() below shells out to `gh api`, and without
+          # this it fails silently (fetch_upstream_file swallows the auth
+          # error) rather than crashing: current_upstream_version would
+          # just come back empty, silently disabling the "did someone else
+          # already ship this" guard instead of erroring out.
+          GH_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+          MATRIX_PACKAGE: ${{ matrix.package }}
         run: |
           set -euo pipefail
           source scripts/lib.sh
 
-          prgnam="$(basename "${{ matrix.package }}")"
-          pkg_dir="${{ matrix.package }}"
+          prgnam="$(basename "$MATRIX_PACKAGE")"
+          pkg_dir="$MATRIX_PACKAGE"
           version="$(info_get "$pkg_dir/${prgnam}.info" VERSION)"
           [ -n "$version" ] || die "$prgnam: couldn't read VERSION out of $pkg_dir/${prgnam}.info"
 
@@ -132,7 +141,7 @@ jobs:
           **Note:** the .info/.SlackBuild reviewed in perrin4869/slackbuilds were regenerated against a fresh copy of ${SBO_UPSTREAM}@${UPSTREAM_REF} at submit time and differ slightly from what was originally reviewed - upstream likely moved in the meantime. Please double check."
           fi
 
-          pr_url="$(GH_TOKEN="$SBO_SUBMIT_TOKEN" gh pr create \
+          pr_url="$(gh pr create \
               --repo "$SBO_UPSTREAM" \
               --base "$UPSTREAM_REF" \
               --head "${fork_owner}:${branch}" \
@@ -148,23 +157,33 @@ jobs:
         # it in place - it's the diff baseline for this package's *next*
         # update PR, not a one-off review artifact. Usually nothing changed
         # (no drift), so there's nothing to commit.
+        env:
+          MATRIX_PACKAGE: ${{ matrix.package }}
+          SUBMIT_RESULT: ${{ steps.submit.outputs.result }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- "${{ matrix.package }}"; then
+          if git diff --quiet -- "$MATRIX_PACKAGE"; then
             echo "no drift - already matched what was submitted"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${{ matrix.package }}"
+          git add "$MATRIX_PACKAGE"
           printf 'chore: sync staged %s to what was actually submitted\n\n%s\n' \
-            "$(basename "${{ matrix.package }}")" "${{ steps.submit.outputs.result }}" > /tmp/commit-msg.txt
+            "$(basename "$MATRIX_PACKAGE")" "$SUBMIT_RESULT" > /tmp/commit-msg.txt
           git commit -F /tmp/commit-msg.txt
-          # Master may have moved (another matrix job's commit) - rebase
-          # this one onto it rather than clobbering.
+
+          # Retries the PUSH itself, not just the rebase - master can move
+          # again between our rebase and our push (another matrix job's
+          # commit lands in that window), so a failed push needs a fresh
+          # fetch+rebase before trying again, not just a single push after
+          # one rebase attempt.
           for i in 1 2 3 4 5; do
+            if git push origin HEAD:master; then
+              break
+            fi
+            [ "$i" -lt 5 ] || { echo "::error::failed to push after 5 attempts"; exit 1; }
             git fetch origin master
-            git rebase origin/master && break
+            git rebase origin/master
             sleep $((i * 5))
           done
-          git push origin HEAD:master

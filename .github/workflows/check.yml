@@ -25,10 +25,12 @@ jobs:
         with:
           fetch-depth: 0
       - id: list
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           changed="$(git diff --name-only \
-              "origin/${{ github.event.pull_request.base.ref }}" HEAD \
+              "origin/$BASE_REF" HEAD \
               -- '*/*/*.info' \
             | xargs -r -n1 dirname | sort -u)"
 
@@ -59,9 +61,14 @@ jobs:
 
       - name: Derive category/prgnam from path
         id: meta
+        env:
+          # Passed via env, not interpolated into the script body - this
+          # is a directory name out of a PR diff, not something to trust
+          # as inert text. See the security note in the repo README.
+          MATRIX_PACKAGE: ${{ matrix.package }}
         run: |
-          category="$(dirname "${{ matrix.package }}" | xargs basename)"
-          prgnam="$(basename "${{ matrix.package }}")"
+          category="$(dirname "$MATRIX_PACKAGE" | xargs basename)"
+          prgnam="$(basename "$MATRIX_PACKAGE")"
           echo "category=$category" >> "$GITHUB_OUTPUT"
           echo "prgnam=$prgnam" >> "$GITHUB_OUTPUT"
 
@@ -72,19 +79,26 @@ jobs:
       # submitted anyway. Simpler to just check against current master both
       # times.
       - name: Clone upstream and overlay staged files
+        env:
+          MATRIX_PACKAGE: ${{ matrix.package }}
+          CATEGORY: ${{ steps.meta.outputs.category }}
+          PRGNAM: ${{ steps.meta.outputs.prgnam }}
         run: |
           set -euo pipefail
           git clone --quiet --depth 1 --branch master \
             https://github.com/SlackBuildsOrg/slackbuilds.git upstream-tree
 
-          pkg_dir="upstream-tree/${{ steps.meta.outputs.category }}/${{ steps.meta.outputs.prgnam }}"
-          cp "${{ matrix.package }}/${{ steps.meta.outputs.prgnam }}.info" "$pkg_dir/"
-          cp "${{ matrix.package }}/${{ steps.meta.outputs.prgnam }}.SlackBuild" "$pkg_dir/"
+          pkg_dir="upstream-tree/${CATEGORY}/${PRGNAM}"
+          cp "${MATRIX_PACKAGE}/${PRGNAM}.info" "$pkg_dir/"
+          cp "${MATRIX_PACKAGE}/${PRGNAM}.SlackBuild" "$pkg_dir/"
 
       - name: Pull build image
         run: docker pull ghcr.io/perrin4869/slackbuilds:15.0
 
       - name: sbolint + build + sbopkglint
+        env:
+          CATEGORY: ${{ steps.meta.outputs.category }}
+          PRGNAM: ${{ steps.meta.outputs.prgnam }}
         run: |
           set -euo pipefail
           mkdir -p out
@@ -100,14 +114,15 @@ jobs:
             -v sbo-cache:/var/cache/sbopkg \
             -v "$PWD/out:/output" \
             -e REPO_NAME=local -e REPO_BRANCH=local \
+            -e CATEGORY -e PRGNAM \
             ghcr.io/perrin4869/slackbuilds:15.0 \
             bash -lc '
               set -euo pipefail
               cd /var/lib/sbopkg/local/local
-              sbolint "${{ steps.meta.outputs.category }}/${{ steps.meta.outputs.prgnam }}"
-              sqg -p "${{ steps.meta.outputs.prgnam }}"
-              sbopkg -B -e stop -i "${{ steps.meta.outputs.prgnam }}"
-              pkg="$(ls /tmp/${{ steps.meta.outputs.prgnam }}-*.tgz | head -1)"
+              sbolint "${CATEGORY}/${PRGNAM}"
+              sqg -p "${PRGNAM}"
+              sbopkg -B -e stop -i "${PRGNAM}"
+              pkg="$(ls "/tmp/${PRGNAM}"-*.tgz | head -1)"
               sbopkglint "$pkg"
               cp "$pkg" /output/
             ' 2>&1 | tee build-log.txt

@@ -76,6 +76,11 @@ jobs:
           # ultimately derives from upstream tag data, not just our own
           # packages/*.conf. See the security note in the repo README.
           VERSION: ${{ steps.target.outputs.version }}
+          # check_known -> check_result calls upstream_version() and
+          # already_pending(), both of which shell out to `gh` - without
+          # this, every real (non-empty-package) invocation fails on
+          # unauthenticated gh api/gh pr list calls.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           source scripts/lib.sh

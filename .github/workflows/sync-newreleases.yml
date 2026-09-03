@@ -80,11 +80,11 @@ jobs:
 
             if [ -z "$existing" ]; then
               log "$PRGNAM: adding $github_repo to newreleases.io"
-              nr_api POST /projects "$(jq -n \
+              add_response="$(nr_api POST /projects "$(jq -n \
                   --arg name "$github_repo" --arg hook "$NEWRELEASES_WEBHOOK_ID" \
-                  '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')" \
-                | jq -e '.project // empty' >/dev/null \
-                || log "warn: $PRGNAM: add failed: $(nr_api POST /projects "{}" 2>&1 | head -c 200)"
+                  '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')")"
+              jq -e '.project // empty' <<< "$add_response" >/dev/null \
+                || log "warn: $PRGNAM: add failed: $(printf '%s' "$add_response" | head -c 200)"
               exit 0
             fi
 

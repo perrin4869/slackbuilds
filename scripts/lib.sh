@@ -1,5 +1,6 @@
 #!/bin/bash
-# Shared helpers for detect.sh / generate.sh / submit.sh.
+# Shared helpers, sourced directly by workflow run: steps (there are no
+# detect.sh/generate.sh/submit.sh scripts - everything here is a function).
 #
 # Conventions used throughout this pipeline:
 #  - "upstream" always means SlackBuildsOrg/slackbuilds@master, fetched fresh.
@@ -94,23 +95,21 @@ version_gt() {
 
 # --- upstream fetch -------------------------------------------------
 
-# Print the raw contents of a file from SlackBuildsOrg/slackbuilds, at
-# $UPSTREAM_REF unless a third arg overrides it (submit.sh re-fetches at
-# a specific SHA to compare against what a PR was reviewed at). Empty
-# output if the file doesn't exist - callers treat that as "package not
-# in upstream yet".
+# Print the raw contents of a file from SlackBuildsOrg/slackbuilds@master.
+# Empty output if the file doesn't exist - callers treat that as "package
+# not in upstream yet".
 fetch_upstream_file() {
-    local path="$1" ref="${2:-$UPSTREAM_REF}"
-    gh api "repos/${UPSTREAM_OWNER}/${UPSTREAM_REPO}/contents/${path}?ref=${ref}" \
+    local path="$1"
+    gh api "repos/${UPSTREAM_OWNER}/${UPSTREAM_REPO}/contents/${path}?ref=${UPSTREAM_REF}" \
         -H 'Accept: application/vnd.github.raw' 2>/dev/null || true
 }
 
 # Print VERSION as currently shipped in SlackBuildsOrg/slackbuilds for a
 # given category/prgnam, or nothing if the package isn't there.
 upstream_version() {
-    local category="$1" prgnam="$2" ref="${3:-$UPSTREAM_REF}" tmp
+    local category="$1" prgnam="$2" tmp
     tmp="$(mktemp)"
-    fetch_upstream_file "${category}/${prgnam}/${prgnam}.info" "$ref" > "$tmp"
+    fetch_upstream_file "${category}/${prgnam}/${prgnam}.info" > "$tmp"
     [ -s "$tmp" ] && info_get "$tmp" VERSION
     rm -f "$tmp"
 }
@@ -238,9 +237,6 @@ TOML
 }
 
 # --- detection orchestration --------------------------------------------
-# Used by the detect composite action (.github/actions/detect). A function,
-# not a script: called once per package inside that action's own loop, from
-# webhook.yml and poll.yml alike.
 
 # An update is only "needed" if it beats both what upstream currently ships
 # AND the last version this repo already opened a PR for (which may still
@@ -333,10 +329,10 @@ check_result() {
 }
 
 # Resolve $conf's latest version by scanning (resolve_latest) and print
-# its status line. Used by the detect action - poll.yml only; webhook.yml
-# already has a version from the webhook payload and uses check_known
-# instead, since re-scanning to confirm what newreleases.io just told us
-# would defeat the point of it telling us.
+# its status line. Used only by poll.yml; webhook.yml already has a
+# version from the webhook payload and uses check_known instead, since
+# re-scanning to confirm what newreleases.io just told us would defeat
+# the point of it telling us.
 check_one() {
     local conf="$1"
     load_package_conf "$conf"
@@ -362,11 +358,9 @@ check_known() {
 }
 
 # --- package generation ---------------------------------------------------
-# Used by the open-update-prs composite action and submit.yml. A function,
-# not a script: open-update-prs calls this once per NEEDS_UPDATE line inside
-# its own loop, which a composite/reusable action can't be invoked from (a
-# `uses:` step is static, not callable dynamically per loop iteration) - so
-# this has to be something plain bash can call directly, in any context.
+# Used once per job by two different workflow files -
+# open-update-prs.yml's own step and submit.yml's - so it stays a plain
+# function here rather than one workflow owning it.
 #
 # Produces an updated .info + .SlackBuild for one package at a target
 # version, derived from a *fresh* upstream checkout - never from anything
@@ -473,8 +467,8 @@ EOF
 }
 
 # --- PR body rendering -----------------------------------------------------
-# Used by the open-update-prs composite action, once per NEEDS_UPDATE line -
-# same "must be callable from inside a loop" reasoning as generate_package.
+# Used by open-update-prs.yml, once per package - same reasoning as
+# generate_package for why it's a plain function.
 #
 # Packages live at <category>/<prgnam>/ in this repo - the exact same path
 # they occupy in SlackBuildsOrg/slackbuilds - so the PR's own "Files
