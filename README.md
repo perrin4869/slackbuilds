@@ -27,8 +27,10 @@ what was reviewed here, since upstream may have moved in the meantime.
 Each tracked package lives in this repo at `<category>/<prgnam>/` - the same
 path it occupies in `SlackBuildsOrg/slackbuilds`. So an update PR's **Files
 changed** tab already is the real diff - what you see for
-`libraries/tree-sitter/tree-sitter.info` is exactly what lands upstream if
-you merge.
+`libraries/tree-sitter/tree-sitter.info` is what lands upstream if you
+merge, unless upstream moved since the PR was opened: `submit.yml`
+re-derives the package fresh at merge time, and flags it on the resulting
+upstream PR if that changes anything.
 
 ## Layout
 
