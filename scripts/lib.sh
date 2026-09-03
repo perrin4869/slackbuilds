@@ -176,6 +176,18 @@ resolve_codeberg_version() {
         | sort -V | tail -1
 }
 
+# Extract the version out of a single already-known tag (a webhook
+# payload's own version field) using TAG_REGEX, instead of scanning every
+# tag for candidates - the tag is trusted as-is (see check_one: still
+# subject to the normal version_gt-against-upstream check, and a human
+# reviewing the resulting PR before merge), TAG_REGEX just normalizes its
+# format the same way it would if found via a full scan. Prints nothing
+# if it doesn't match, so the caller can fall back to that full scan.
+resolve_known_tag() {
+    local tag="$1" regex="$2"
+    printf '%s' "$tag" | grep -E "$regex" | sed -E "s/$regex/\\1/"
+}
+
 # --- kernel.org cgit version resolution --------------------------------
 
 # cgit has no JSON API; scrape the /refs/ page's "Tag" column, which links
@@ -275,17 +287,20 @@ resolve_latest() {
     esac
 }
 
-# Prints one status line to stdout:
+# Given a package conf already loaded (CATEGORY/PRGNAM/etc in scope) and a
+# resolved candidate version (possibly empty - "couldn't resolve one"),
+# decide what to do about it and print one status line:
 #   NEEDS_UPDATE <prgnam> <category> <new_version>   an update PR should be opened
 #   FROZEN <prgnam> <reason> (N behind: <latest>)     skipped, reported for the summary
 #   UP_TO_DATE <prgnam> <version>                     nothing to do
 #   UNRESOLVED <prgnam>                               couldn't determine a latest version
-check_one() {
-    local conf="$1"
-    load_package_conf "$conf"
-
-    local latest
-    latest="$(resolve_latest || true)"
+#
+# Shared by check_one (resolves $latest by scanning - poll.yml's job) and
+# check_known (webhook.yml's job: $latest is already known, from the
+# webhook payload) - what to do with a candidate version is identical
+# either way, only how it was obtained differs.
+check_result() {
+    local latest="$1"
 
     if [ "${FROZEN:-0}" = "1" ]; then
         if [ -n "$latest" ] && version_gt "$latest" "$VERSION"; then
@@ -320,6 +335,35 @@ check_one() {
     fi
 
     echo "NEEDS_UPDATE $PRGNAM $CATEGORY $latest"
+}
+
+# Resolve $conf's latest version by scanning (resolve_latest) and print
+# its status line. Used by the detect action - poll.yml only; webhook.yml
+# already has a version from the webhook payload and uses check_known
+# instead, since re-scanning to confirm what newreleases.io just told us
+# would defeat the point of it telling us.
+check_one() {
+    local conf="$1"
+    load_package_conf "$conf"
+    local latest
+    latest="$(resolve_latest || true)"
+    check_result "$latest"
+}
+
+# Like check_one, but $known_version is already known for this package (a
+# webhook payload's own version field) rather than something to resolve
+# by scanning. Extracts/normalizes it via TAG_REGEX the same way a scan
+# would (see resolve_known_tag); if it doesn't match, reports UNRESOLVED
+# rather than falling back to a scan here - that's poll.yml's job, on its
+# own schedule, not something webhook.yml also does on every firing.
+check_known() {
+    local conf="$1" known_version="$2"
+    load_package_conf "$conf"
+    [ "${POLL:-0}" != "1" ] || die "$PRGNAM: POLL=1, has no webhook option - shouldn't reach check_known"
+    [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: TAG_REGEX not set"
+    local latest
+    latest="$(resolve_known_tag "$known_version" "$TAG_REGEX" || true)"
+    check_result "$latest"
 }
 
 # --- package generation ---------------------------------------------------

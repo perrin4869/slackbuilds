@@ -69,26 +69,34 @@ composite action if more than one workflow needs it.
   for Rust packages (originally run by hand; see `generate_package()`'s
   `rust`/`rust64` case for the invocation). Kept as real scripts, not
   functions - substantial standalone tools in their own right, not glue.
-- `.github/actions/detect` - resolves the latest valid version for one,
-  several, or all tracked packages and decides which need an update PR.
-  A composite action (not a script) because both `webhook.yml` and
-  `poll.yml` call it.
-- `.github/actions/open-update-prs` - given `detect`'s output, opens an
-  update PR for every `NEEDS_UPDATE` line. Also a composite action for the
-  same reason - shared by `webhook.yml` and `poll.yml`.
+- `.github/actions/open-update-prs` - given a `detect`-shaped output (one
+  line per package - see `check_result()` in `scripts/lib.sh`), opens an
+  update PR for every `NEEDS_UPDATE` line. A composite action because
+  it's called from both `webhook.yml` and `poll.yml`.
 
-Every per-package loop (`detect`, `open-update-prs`, `sync-newreleases.yml`)
-wraps its per-iteration body in a subshell (`name() ( ... )`, parens not
-braces) rather than calling it as a plain function or inline. `die()`
-(a malformed `.conf`, a missing field) exits the whole process it runs
-in - called directly, or via a plain function, that would abort the
-*entire* loop under `set -e`, silently skipping every remaining package
-while still reporting the job as fine. In a subshell, `exit 1` only ends
-that one package's attempt; the caller catches it with `||` and moves on.
+There's deliberately no `detect` action - `poll.yml` is the only workflow
+that resolves a version by scanning (`check_one()`, via `resolve_latest()`),
+so that loop is inlined directly into its own "Detect" step rather than
+factored out for a single caller. `webhook.yml` never scans: it already
+has a version from the webhook payload (or a manual dispatch input) and
+calls `check_known()` instead - see "Detection" below. Both eventually
+call the same `check_result()` to decide FROZEN/UP_TO_DATE/NEEDS_UPDATE
+and format the output line; only how the candidate version was obtained
+differs.
 
-`detect`'s output (and `open-update-prs`'s `detect-output` input) carries
-data that ultimately derives from upstream tag names, not just this
-repo's own config - so callers pass it via `env:` rather than
+Every per-package loop (`poll.yml`'s Detect step, `open-update-prs`,
+`sync-newreleases.yml`) wraps its per-iteration body in a subshell
+(`name() ( ... )`, parens not braces) rather than calling it as a plain
+function or inline. `die()` (a malformed `.conf`, a missing field) exits
+the whole process it runs in - called directly, or via a plain function,
+that would abort the *entire* loop under `set -e`, silently skipping
+every remaining package while still reporting the job as fine. In a
+subshell, `exit 1` only ends that one package's attempt; the caller
+catches it with `||` and moves on.
+
+`detect`-shaped output (and `open-update-prs`'s `detect-output` input)
+carries data that ultimately derives from upstream tag names, not just
+this repo's own config - so callers pass it via `env:` rather than
 interpolating `${{ }}` directly into a `run:` script body. The latter is
 a real GitHub Actions footgun: `${{ }}` in a `run:` block is substituted
 as raw text *before* the shell parses it, so untrusted content there can
@@ -152,7 +160,7 @@ FROZEN=1
 FROZEN_REASON="why, and what unblocks it"
 ```
 
-The `detect` action skips frozen packages but still reports how far behind
+`check_result()` skips frozen packages but still reports how far behind
 they are in the run summary, so they don't rot silently.
 
 ## Detection
@@ -161,20 +169,27 @@ they are in the run summary, so they don't rot silently.
 by a [newreleases.io](https://newreleases.io/) webhook watching each
 tracked project, or manually via `workflow_dispatch`.
 
-The webhook payload names which project changed
-(`client_payload.project`), so a firing is scoped to just that one
-package (mapped back to a `prgnam` by matching `SOURCE`'s `owner/repo`
-in `packages/*.conf`) instead of re-checking everything. It still goes
-through the `detect` action's normal resolution and `TAG_REGEX` filtering rather
-than trusting the webhook's own version field - that filter exists
-precisely because raw upstream signals (test tags, LTS backports, etc.)
-aren't trustworthy on their own; the webhook only saves re-checking
-*every other* package. If the payload is missing or names a project no
-`.conf` matches (manual dispatch with no `package` input, or a
-misconfigured webhook), it falls back to checking every *webhook-able*
-(github.com/codeberg.org `SOURCE`) package - excluding `POLL=1` ones,
-which have no webhook option at all and are `poll.yml`'s job instead
-(below).
+The webhook payload names which project changed and its new version
+(`client_payload.project` / `client_payload.version`), so a firing is
+scoped to just that one package (mapped back to a `prgnam` by matching
+`SOURCE`'s `owner/repo` in `packages/*.conf`) and trusts that version
+directly (`check_known()`) instead of scanning every tag for candidates -
+newreleases.io already did that. It's still run through `TAG_REGEX` (not
+as a filter over a full candidate list here, just to extract/normalize
+the version the same way a full scan would) and the normal
+`version_gt`-against-upstream check, so a garbage value can't silently
+look like a real update; anything that still gets through is a PR to
+review before merging, same as any other update. If the version doesn't
+match `TAG_REGEX` (an unexpected tag shape), that package is reported
+`UNRESOLVED` rather than falling back to a scan here - re-scanning on
+every webhook firing to double-check what newreleases.io just told us
+would defeat the point of it telling us; a package stuck `UNRESOLVED`
+this way gets picked up by `poll.yml`'s own cron regardless (below), or
+can be checked immediately with its `workflow_dispatch`. If the payload
+names a project no `.conf` matches at all (a misconfigured webhook, or a
+package not yet added here), `webhook.yml` just warns and does nothing -
+same reasoning: it reacts to known versions, it doesn't go looking for
+them.
 
 **Webhook payload template** (newreleases.io → your webhook → payload
 fields), since the default payload doesn't reach GitHub in a form it
@@ -185,29 +200,39 @@ below:
 {
   "event_type": "upstream-release",
   "client_payload": {
-    "project": "{project}"
+    "project": "{project}",
+    "version": "{version}"
   }
 }
 ```
 
-`{project}` is newreleases.io's own template variable, filled in with the
-`provider/name` of whichever tracked project fired (e.g. `jj-vcs/jj`) -
-matching the `owner/repo` path of that package's `SOURCE` URL exactly.
+`{project}` and `{version}` are newreleases.io's own template variables:
+`{project}` is the `provider/name` of whichever tracked project fired
+(e.g. `jj-vcs/jj`) - matching the `owner/repo` path of that package's
+`SOURCE` URL exactly - and `{version}` is that release's tag/version
+string as newreleases.io itself resolved it (projects are registered
+with `exclude_prereleases: true` - see `sync-newreleases.yml` below - so
+this is never a pre-release).
 
-No cron here: every package `webhook.yml` handles is webhook-covered. The
-one place a cron actually belongs is `poll.yml`, split out for
-exactly the packages a webhook *can't* reach:
+`webhook.yml` has no cron and no scanning fallback of its own - it only
+ever checks a version it's already been given. All scanning (the
+`resolve_latest()`/`TAG_REGEX`-candidate-list/`nvchecker` machinery) lives
+in exactly one place:
 
-- **`poll.yml`** (weekly cron + `workflow_dispatch`) checks every
-  `POLL=1` package - `wofi` (hg.sr.ht) and `libtraceevent`
-  (git.kernel.org/cgit) currently. Neither hosts an API of any kind for a
-  service like newreleases.io to watch, so polling is the only option.
-  It installs [nvchecker](https://github.com/lilydjwg/nvchecker) itself,
-  finds the poll-based packages by grepping `packages/*.conf` for
-  `POLL=1`, then reuses the exact same `detect` +
-  `open-update-prs` actions as `webhook.yml` - push vs. pull only changes
-  *how a package's turn to be checked comes up*, not what happens once it
-  is.
+- **`poll.yml`** (weekly cron + `workflow_dispatch`) is the only workflow
+  that resolves a version by scanning (`check_one()`). Its cron checks
+  every `POLL=1` package - `wofi` (hg.sr.ht) and `libtraceevent`
+  (git.kernel.org/cgit) currently, neither of which hosts an API of any
+  kind for a service like newreleases.io to watch, so polling is the only
+  option there. Its `workflow_dispatch` additionally takes an optional
+  `package` input naming *any* package, not just `POLL=1` ones - the one
+  remaining way to scan a github/codeberg package on demand, since
+  `webhook.yml`'s own `workflow_dispatch` only simulates a webhook firing
+  (it still requires a known version as input, it doesn't scan either).
+  Both `poll.yml` and `webhook.yml` finish the same way regardless -
+  `open-update-prs` for every `NEEDS_UPDATE` line - push vs. pull only
+  changes *how a candidate version was obtained*, not what happens once
+  one is.
 
 This push/pull split mirrors `image.yml`/`image-deps.yml`'s (below) -
 detection workflows are separated by trigger mechanism, not bundled by

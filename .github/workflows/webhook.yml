@@ -2,19 +2,24 @@
 name: Release webhook
 
 on:
-  # We don't detect anything here - newreleases.io already did that and
-  # is telling us via webhook. See "Determine target package" below for
-  # what we still have to verify ourselves even so.
+  # We don't scan for anything here - newreleases.io already resolved the
+  # version and is telling us via webhook. See "Determine target package"
+  # below for what we still verify ourselves even so.
   repository_dispatch:
     types: [upstream-release]
-  # No cron: this workflow only ever checks webhook-able (github/codeberg)
-  # packages - see "Determine target package" below. Packages with no
-  # webhook option at all (POLL=1) are poll.yml's job.
+  # No cron, and no fallback scan for a missing/unmatched payload either -
+  # this workflow only ever checks a version it's already been given.
+  # Scanning (the detect action, TAG_REGEX candidate lists, nvchecker) is
+  # poll.yml's job alone, on its own schedule - including an ad hoc check
+  # of a single package via poll.yml's own workflow_dispatch.
   workflow_dispatch:
     inputs:
       package:
-        description: 'Single package to check (PRGNAM); all packages if empty'
-        required: false
+        description: 'Package to check (PRGNAM) - simulates a webhook firing for it'
+        required: true
+      version:
+        description: "Version to check - simulates the webhook payload's own version field"
+        required: true
 
 concurrency:
   group: webhook
@@ -37,37 +42,61 @@ jobs:
           # Only set for repository_dispatch, and only if the webhook was
           # configured with the client_payload template - see README.
           PROJECT: ${{ github.event.client_payload.project }}
+          WEBHOOK_VERSION: ${{ github.event.client_payload.version }}
+          DISPATCH_PACKAGE: ${{ github.event.inputs.package }}
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
-          # Every packages/*.conf except POLL=1 ones - those have
-          # no webhook option and are poll.yml's job (it doesn't install
-          # nvchecker here, and doesn't need to).
-          all_webhookable="$(grep -L '^POLL=1$' packages/*.conf \
-            | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
 
-          if [ -n "${{ github.event.inputs.package }}" ]; then
-            package="${{ github.event.inputs.package }}"
+          if [ -n "$DISPATCH_PACKAGE" ]; then
+            package="$DISPATCH_PACKAGE"
+            version="$DISPATCH_VERSION"
           elif [ -n "$PROJECT" ]; then
             source scripts/lib.sh
             package="$(find_package_by_repo "$PROJECT")"
             if [ -n "$package" ]; then
               echo "webhook names $PROJECT -> scoping to $package"
+              version="$WEBHOOK_VERSION"
             else
-              echo "webhook names $PROJECT, no packages/*.conf matches it - checking everything webhook-able"
-              package="$all_webhookable"
+              echo "::warning::webhook names $PROJECT, no packages/*.conf matches it - nothing to check (add a packages/*.conf for it, or fix sync-newreleases.yml's tracked-project list)"
+              package=""
+              version=""
             fi
           else
-            package="$all_webhookable"
+            echo "::error::no client_payload.project and no package input - nothing to check"
+            exit 1
           fi
-          echo "package=$package" >> "$GITHUB_OUTPUT"
 
-      - name: Detect
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check known version
         id: detect
-        uses: ./.github/actions/detect
-        with:
-          packages: ${{ steps.target.outputs.package }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ steps.target.outputs.package }}
+          # Passed via env, not interpolated into the script body - this
+          # ultimately derives from upstream tag data, not just our own
+          # packages/*.conf. See the security note in the repo README.
+          VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          result=""
+          if [ -n "$PACKAGE" ]; then
+            conf="packages/${PACKAGE}.conf"
+            if [ ! -f "$conf" ]; then
+              result="UNRESOLVED $PACKAGE (no such package config: $conf)"
+            else
+              result="$(check_known "$conf" "$VERSION")" || result="UNRESOLVED $PACKAGE (check failed - see log)"
+            fi
+          fi
+
+          {
+            echo "result<<GHADETECTEOF"
+            printf '%s\n' "$result"
+            echo "GHADETECTEOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Job summary
         if: always()
