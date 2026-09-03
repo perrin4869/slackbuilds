@@ -83,8 +83,13 @@ jobs:
               add_response="$(nr_api POST /projects "$(jq -n \
                   --arg name "$github_repo" --arg hook "$NEWRELEASES_WEBHOOK_ID" \
                   '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')")"
-              jq -e '.project // empty' <<< "$add_response" >/dev/null \
-                || log "warn: $PRGNAM: add failed: $(printf '%s' "$add_response" | head -c 200)"
+              # Success responses return project fields at the top level
+              # (id/name/provider/...), never wrapped under a "project" key -
+              # verified against newreleases.io's own API docs.
+              if ! jq -e '.id // empty' <<< "$add_response" >/dev/null; then
+                log "warn: $PRGNAM: add failed: $(printf '%s' "$add_response" | head -c 200)"
+                exit 1
+              fi
               exit 0
             fi
 
@@ -93,13 +98,29 @@ jobs:
             if [ "$has_hook" != "true" ]; then
               log "$PRGNAM: attaching webhook to existing project $github_repo"
               hooks="$(printf '%s' "$existing" | jq -c --arg h "$NEWRELEASES_WEBHOOK_ID" '(.webhooks // []) + [$h]')"
-              nr_api POST "/projects/${id}" "$(jq -n --argjson hooks "$hooks" '{webhooks: $hooks}')" >/dev/null
+              attach_response="$(nr_api POST "/projects/${id}" "$(jq -n --argjson hooks "$hooks" '{webhooks: $hooks}')")"
+              if ! jq -e '.id // empty' <<< "$attach_response" >/dev/null; then
+                log "warn: $PRGNAM: attach failed: $(printf '%s' "$attach_response" | head -c 200)"
+                exit 1
+              fi
             else
               log "$PRGNAM: already tracked with webhook attached"
             fi
           )
 
+          # continue-on-error at the job level (above) keeps a real failure
+          # here from blocking anything else - but that's about not
+          # cascading, not about hiding it: a job with continue-on-error
+          # still shows its own failure in the Actions UI as long as the
+          # step itself actually exits nonzero, which is what this exists
+          # to guarantee - a genuine API failure (a real 400, not "already
+          # exists") must not be swallowed into a quietly-successful run.
+          failed=""
           for conf in packages/*.conf; do
             [ -e "$conf" ] || continue
-            sync_one "$conf" || log "warn: $conf: sync failed - see log above"
+            sync_one "$conf" || { log "warn: $conf: sync failed - see log above"; failed+="$conf "; }
           done
+
+          if [ -n "$failed" ]; then
+            die "sync failed for:$failed(see warnings above)"
+          fi
