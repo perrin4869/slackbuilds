@@ -115,11 +115,6 @@ upstream_version() {
     rm -f "$tmp"
 }
 
-# HEAD sha of SlackBuildsOrg/slackbuilds@master, for UPDATE.json provenance.
-upstream_head_sha() {
-    gh api "repos/${UPSTREAM_OWNER}/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}" --jq '.sha'
-}
-
 # --- GitHub-hosted version resolution --------------------------------
 
 # Print every tag and release tag_name for a GitHub repo, deduped, one per

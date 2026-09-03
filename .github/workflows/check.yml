@@ -5,7 +5,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - '**/UPDATE.json'
+      - '**/*.info'
 
 concurrency:
   group: check-${{ github.event.pull_request.number }}
@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           changed="$(git diff --name-only \
               "origin/${{ github.event.pull_request.base.ref }}" HEAD \
-              -- '*/*/UPDATE.json' \
+              -- '*/*/*.info' \
             | xargs -r -n1 dirname | sort -u)"
 
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
@@ -57,21 +57,25 @@ jobs:
           echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
           sudo systemctl start docker
 
-      - name: Read UPDATE.json
+      - name: Derive category/prgnam from path
         id: meta
         run: |
           category="$(dirname "${{ matrix.package }}" | xargs basename)"
           prgnam="$(basename "${{ matrix.package }}")"
-          upstream_sha="$(jq -r .upstream_sha "${{ matrix.package }}/UPDATE.json")"
           echo "category=$category" >> "$GITHUB_OUTPUT"
           echo "prgnam=$prgnam" >> "$GITHUB_OUTPUT"
-          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Clone upstream at recorded SHA and overlay staged files
+      # Fresh current master, not a pinned historical SHA - submit.yml
+      # re-derives against fresh upstream at merge time regardless (upstream
+      # is always the source of truth, see its own comment), so pinning
+      # here wouldn't guarantee the build check matches what's actually
+      # submitted anyway. Simpler to just check against current master both
+      # times.
+      - name: Clone upstream and overlay staged files
         run: |
           set -euo pipefail
-          git clone --quiet https://github.com/SlackBuildsOrg/slackbuilds.git upstream-tree
-          git -C upstream-tree checkout --quiet "${{ steps.meta.outputs.upstream_sha }}"
+          git clone --quiet --depth 1 --branch master \
+            https://github.com/SlackBuildsOrg/slackbuilds.git upstream-tree
 
           pkg_dir="upstream-tree/${{ steps.meta.outputs.category }}/${{ steps.meta.outputs.prgnam }}"
           cp "${{ matrix.package }}/${{ steps.meta.outputs.prgnam }}.info" "$pkg_dir/"

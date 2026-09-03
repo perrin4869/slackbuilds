@@ -56,22 +56,12 @@ jobs:
           upstream_dir="$(mktemp -d)"
           git clone --quiet --depth 1 --branch master \
               https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
-          upstream_sha="$(git -C "$upstream_dir" rev-parse HEAD)"
 
           rm -rf "${category}/${prgnam}"
           mkdir -p "${category}/${prgnam}"
           generate_package "$prgnam" "$version" "$upstream_dir" "${category}/${prgnam}"
 
           render_pr_body "$prgnam" "$version" > /tmp/pr-body.md
-
-          cat > "${category}/${prgnam}/UPDATE.json" <<EOF
-          {
-            "prgnam": "$prgnam",
-            "category": "$category",
-            "version": "$version",
-            "upstream_sha": "$upstream_sha"
-          }
-          EOF
 
           sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
 
@@ -86,5 +76,6 @@ jobs:
           committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           add-paths: |
-            ${{ inputs.category }}/${{ inputs.prgnam }}
+            ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
+            ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
             packages/${{ inputs.prgnam }}.conf

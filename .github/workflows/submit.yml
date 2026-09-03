@@ -5,7 +5,7 @@ on:
   push:
     branches: [master]
     paths:
-      - '**/UPDATE.json'
+      - '**/*.info'
 
 concurrency:
   group: submit
@@ -27,7 +27,7 @@ jobs:
       - id: list
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only HEAD~1 HEAD -- '*/*/UPDATE.json' \
+          changed="$(git diff --name-only HEAD~1 HEAD -- '*/*/*.info' \
             | xargs -r -n1 dirname | sort -u)"
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
           echo "packages=$json" >> "$GITHUB_OUTPUT"
@@ -45,12 +45,12 @@ jobs:
       - uses: actions/checkout@v5
 
       # Deliberately re-derives from a FRESH upstream clone at HEAD rather
-      # than trusting this repo's copy or the SHA recorded in UPDATE.json -
-      # upstream may have rewritten the package (a mass script pass, another
-      # contributor's PR) since this repo's PR was reviewed, and upstream is
-      # always the source of truth. If the fresh result differs from what
-      # was reviewed, we still submit it (silently discarding stale reviewed
-      # output would be worse), but flag the drift loudly so a human notices.
+      # than trusting this repo's copy - upstream may have rewritten the
+      # package (a mass script pass, another contributor's PR) since this
+      # repo's PR was reviewed, and upstream is always the source of truth.
+      # If the fresh result differs from what was reviewed, we still submit
+      # it (silently discarding stale reviewed output would be worse), but
+      # flag the drift loudly so a human notices.
       - name: Submit to SlackBuildsOrg/slackbuilds
         id: submit
         env:
@@ -61,7 +61,8 @@ jobs:
 
           prgnam="$(basename "${{ matrix.package }}")"
           pkg_dir="${{ matrix.package }}"
-          version="$(jq -r .version "$pkg_dir/UPDATE.json")"
+          version="$(info_get "$pkg_dir/${prgnam}.info" VERSION)"
+          [ -n "$version" ] || die "$prgnam: couldn't read VERSION out of $pkg_dir/${prgnam}.info"
 
           conf="packages/${prgnam}.conf"
           load_package_conf "$conf"
@@ -73,7 +74,7 @@ jobs:
           [ -f "$pkg_dir/${PRGNAM}.info" ]       || die "missing $pkg_dir/${PRGNAM}.info"
           [ -f "$pkg_dir/${PRGNAM}.SlackBuild" ] || die "missing $pkg_dir/${PRGNAM}.SlackBuild"
 
-          # --- re-check against upstream HEAD, not the SHA this PR was opened against -
+          # --- re-check against upstream HEAD, in case someone else already shipped it -
           current_upstream_version="$(upstream_version "$CATEGORY" "$PRGNAM")"
           if [ -n "$current_upstream_version" ] && ! version_gt "$version" "$current_upstream_version"; then
               log "$PRGNAM: upstream already ships $current_upstream_version (>= $version) - skipping submit, someone else got there first"

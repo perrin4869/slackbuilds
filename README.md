@@ -124,7 +124,7 @@ something the shell re-parses.)
 
 **Opening the PR**: `open-update-prs.yml`'s own `run:` step only
 regenerates the package into the checkout (`generate_package()`,
-`render_pr_body()`, the `VERSION` bump, `UPDATE.json`) - branching,
+`render_pr_body()`, the `VERSION` bump) - branching,
 committing, pushing, and creating (or updating) the PR itself is
 `peter-evans/create-pull-request`, not custom git/`gh` plumbing. It
 already handles what used to be hand-rolled here: if a branch for that
@@ -148,8 +148,7 @@ specifically so its own tracking variables don't share a name with (and
 get silently overwritten by) those globals right after the first call.
 
 - `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild` at
-  its real upstream path (e.g. `libraries/tree-sitter/`), plus an
-  `UPDATE.json` recording the pending version/upstream SHA. **Kept, not
+  its real upstream path (e.g. `libraries/tree-sitter/`). **Kept, not
   deleted, after submission** - it's the diff baseline for that package's
   *next* update PR, so the Files-changed tab shows exactly what changed
   (which crates got bumped, which `DOWNLOAD`/`MD5SUM` lines moved) instead
@@ -157,6 +156,21 @@ get silently overwritten by) those globals right after the first call.
   to the fresh copy it actually submitted (correcting for any drift), not
   the possibly-stale reviewed copy, so the baseline stays accurate even
   when upstream moved in between.
+
+  `check.yml`/`submit.yml` both discover which packages changed by diffing
+  on `**/*.info` (any real update touches it) rather than a synthetic
+  marker file - there used to be an `UPDATE.json` here recording a pending
+  version and an upstream SHA to build against, dropped because it wasn't
+  earning its keep: of its four fields, `prgnam`/`category` were never
+  read by anything (both workflows already derive them from the changed
+  file's own path), `version` duplicated the `.info`'s own `VERSION` field
+  (`info_get` reads that directly now), and the `upstream_sha` pin didn't
+  even deliver the safety it looked like it did - `submit.yml` re-derives
+  against a fresh upstream clone at merge time regardless (see below), so
+  what `check.yml` build-checked could already differ from what actually
+  got submitted, pinned SHA or not. `check.yml` now clones current
+  upstream `master` fresh too, same as `submit.yml` - consistent, and one
+  less thing to keep in sync.
 
 ## Adding a package
 
