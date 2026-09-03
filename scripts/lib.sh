@@ -27,29 +27,40 @@ die() { log "error: $*"; exit 1; }
 # vars from bleeding into the next when looping over all configs.
 load_package_conf() {
     local conf="$1"
-    CATEGORY= PRGNAM= SOURCE= GITHUB_REPO= CODEBERG_REPO= CGIT_URL= SRHT_REPO= \
-        NVCHECKER_URL= NVCHECKER_REGEX= \
-        TAG_REGEX= GENERATOR= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
+    CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
+        GENERATOR= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"
     [ -n "$CATEGORY" ] || die "$conf: CATEGORY not set"
+    [ -n "$SOURCE" ] || die "$conf: SOURCE not set"
     # Most packages are a single source tarball with no special vendoring -
     # GENERATOR is only worth naming explicitly for the rust/rust64 case.
     GENERATOR="${GENERATOR:-tarball}"
 }
 
-# Print the PRGNAM whose packages/*.conf declares GITHUB_REPO or
-# CODEBERG_REPO equal to $1 (an "owner/repo" string), or nothing if none
-# matches. Lets a repository_dispatch payload that names the upstream
-# project which changed scope detection to that one package, instead of
-# re-checking every package on every webhook firing.
+# Strip a known host prefix off a github.com/codeberg.org SOURCE URL,
+# leaving "owner/repo". A no-op (returns $1 unchanged) for anything else -
+# safe to call unconditionally, since the result is only ever compared
+# against a github/codeberg "owner/repo" string, never used standalone.
+repo_path_from_url() {
+    local url="$1"
+    url="${url#https://github.com/}"
+    url="${url#https://codeberg.org/}"
+    printf '%s' "${url%/}"
+}
+
+# Print the PRGNAM whose packages/*.conf's SOURCE (a github.com/codeberg.org
+# URL) resolves to $1 (an "owner/repo" string), or nothing if none matches.
+# Lets a repository_dispatch payload that names the upstream project which
+# changed scope detection to that one package, instead of re-checking every
+# package on every webhook firing.
 find_package_by_repo() {
     local repo="$1" conf
     for conf in packages/*.conf; do
         [ -e "$conf" ] || continue
         load_package_conf "$conf"
-        if [ "${GITHUB_REPO:-}" = "$repo" ] || [ "${CODEBERG_REPO:-}" = "$repo" ]; then
+        if [ "$(repo_path_from_url "$SOURCE")" = "$repo" ]; then
             echo "$PRGNAM"
             return
         fi
@@ -184,37 +195,14 @@ resolve_kernel_cgit_version() {
         | sort -V | tail -1
 }
 
-# --- sourcehut Mercurial version resolution ----------------------------
-
-# hg.sr.ht has no API either; scrape the /tags page's archive links
-# (`archive/<tag>.tar.gz`), which is also the exact source-download URL
-# shape SBo uses for these packages. "tip" is Mercurial's alias for the
-# working head, not a real tag - always excluded.
-srht_hg_candidate_tags() {
-    local repo="$1"
-    curl -sf "https://hg.sr.ht/${repo}/tags" \
-        | grep -oE "archive/[^'\"]+\.tar\.gz" \
-        | sed -E 's#archive/(.+)\.tar\.gz#\1#' \
-        | grep -v '^tip$' | sort -u
-}
-
-resolve_sourcehut_hg_version() {
-    local repo="$1" regex="$2"
-    srht_hg_candidate_tags "$repo" \
-        | grep -E "$regex" \
-        | sed -E "s/$regex/\\1/" \
-        | sort -V | tail -1
-}
-
-# --- nvchecker version resolution (pull-based packages) ----------------
+# --- nvchecker version resolution (POLL=1 packages) ---------------------
 
 # nvchecker's `regex` source: fetch $url, apply $regex directly against the
 # page, take the max (by nvchecker's own version sort) of every match's
-# capture group. Used for SOURCE=nvchecker packages tracked by
-# poll.yml - a maintained tool instead of another bespoke scraper,
-# for packages where we're not already committed to one (see
-# resolve_kernel_cgit_version / resolve_sourcehut_hg_version above, which
-# stay as-is where already in use).
+# capture group. Used for POLL=1 packages, tracked by poll.yml - a
+# maintained tool instead of another bespoke scraper like
+# resolve_kernel_cgit_version above (kept as-is only because it's already
+# in use elsewhere - see image-deps.yml).
 #
 # $regex is written into the TOML as a triple-single-quoted literal
 # string (no escaping of any kind, including embedded quote characters)
@@ -257,36 +245,32 @@ already_pending() {
         --state open --head "update/${prgnam}-${version}" --json number --jq 'length > 0' 2>/dev/null || echo false
 }
 
+# SOURCE is just the repo's endpoint URL - it says where the code lives,
+# not how to check it for updates. Resolution is: POLL=1 always means
+# nvchecker (SOURCE, in that case, is whatever page nvchecker isn't
+# already told to scrape via NVCHECKER_URL - typically the repo's
+# homepage, not consulted here); otherwise it's inferred from SOURCE's
+# host, since that's the only thing that actually determines which API is
+# available (github.com and codeberg.org have one; an arbitrary
+# self-hosted cgit/hg server doesn't, hence POLL=1 for those).
 resolve_latest() {
-    local conf_source="$1"
-    case "$conf_source" in
-        github)
-            [ -n "${GITHUB_REPO:-}" ] || die "$PRGNAM: SOURCE=github but GITHUB_REPO not set"
-            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=github but TAG_REGEX not set"
-            resolve_github_version "$GITHUB_REPO" "$TAG_REGEX"
+    if [ "${POLL:-0}" = "1" ]; then
+        [ -n "${NVCHECKER_URL:-}" ] || die "$PRGNAM: POLL=1 but NVCHECKER_URL not set"
+        [ -n "${NVCHECKER_REGEX:-}" ] || die "$PRGNAM: POLL=1 but NVCHECKER_REGEX not set"
+        resolve_nvchecker_version "$NVCHECKER_URL" "$NVCHECKER_REGEX"
+        return
+    fi
+
+    [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: TAG_REGEX not set"
+    case "$SOURCE" in
+        https://github.com/*)
+            resolve_github_version "$(repo_path_from_url "$SOURCE")" "$TAG_REGEX"
             ;;
-        codeberg)
-            [ -n "${CODEBERG_REPO:-}" ] || die "$PRGNAM: SOURCE=codeberg but CODEBERG_REPO not set"
-            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=codeberg but TAG_REGEX not set"
-            resolve_codeberg_version "$CODEBERG_REPO" "$TAG_REGEX"
-            ;;
-        kernel-cgit)
-            [ -n "${CGIT_URL:-}" ] || die "$PRGNAM: SOURCE=kernel-cgit but CGIT_URL not set"
-            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=kernel-cgit but TAG_REGEX not set"
-            resolve_kernel_cgit_version "$CGIT_URL" "$TAG_REGEX"
-            ;;
-        sourcehut-hg)
-            [ -n "${SRHT_REPO:-}" ] || die "$PRGNAM: SOURCE=sourcehut-hg but SRHT_REPO not set"
-            [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: SOURCE=sourcehut-hg but TAG_REGEX not set"
-            resolve_sourcehut_hg_version "$SRHT_REPO" "$TAG_REGEX"
-            ;;
-        nvchecker)
-            [ -n "${NVCHECKER_URL:-}" ] || die "$PRGNAM: SOURCE=nvchecker but NVCHECKER_URL not set"
-            [ -n "${NVCHECKER_REGEX:-}" ] || die "$PRGNAM: SOURCE=nvchecker but NVCHECKER_REGEX not set"
-            resolve_nvchecker_version "$NVCHECKER_URL" "$NVCHECKER_REGEX"
+        https://codeberg.org/*)
+            resolve_codeberg_version "$(repo_path_from_url "$SOURCE")" "$TAG_REGEX"
             ;;
         *)
-            log "warn: $PRGNAM: no version resolver implemented for SOURCE=$conf_source"
+            die "$PRGNAM: no resolver for SOURCE=$SOURCE (not github.com/codeberg.org, and POLL isn't set)"
             ;;
     esac
 }
@@ -301,7 +285,7 @@ check_one() {
     load_package_conf "$conf"
 
     local latest
-    latest="$(resolve_latest "$SOURCE" || true)"
+    latest="$(resolve_latest || true)"
 
     if [ "${FROZEN:-0}" = "1" ]; then
         if [ -n "$latest" ] && version_gt "$latest" "$VERSION"; then

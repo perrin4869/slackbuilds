@@ -101,33 +101,40 @@ environment variable instead - substituted once, read safely as `"$VAR"`.
 
 Add `packages/<prgnam>.conf`. See any existing file for the shape; a plain
 GitHub-tagged, non-Rust package only needs `CATEGORY`, `PRGNAM`, `SOURCE`,
-`GITHUB_REPO`, `TAG_REGEX`, and `SRC_URL`/`ARCHIVE`/`PRGDIR` templates, plus
-a starting `VERSION`. `TAG_REGEX` matters more than it looks: newest-by-date
-tags are frequently unrelated branches or test tags, so it must be an
-anchored pattern (`^v([0-9]+\.[0-9]+\.[0-9]+)$`) with the version in
-capture group 1.
+`TAG_REGEX`, and `SRC_URL`/`ARCHIVE`/`PRGDIR` templates, plus a starting
+`VERSION`.
+
+`SOURCE` is just the repo's endpoint URL (e.g.
+`https://github.com/tree-sitter/tree-sitter`) - it says where the code
+lives, nothing about how to check it for updates. Earlier versions of
+this file used `SOURCE` as an enum naming the check *mechanism*
+(`github`, `codeberg`, `nvchecker`...) - a real inconsistency, since
+`github`/`codeberg` name a *platform* and `nvchecker` names a *tool*, not
+a platform. Now:
+
+- If `POLL` isn't set, the mechanism is inferred from `SOURCE`'s host:
+  `github.com` or `codeberg.org` (the only two with a webhook-able API,
+  checked by `webhook.yml`), each taking `TAG_REGEX` (anchored, capture
+  group 1 = version). `TAG_REGEX` matters more than it looks:
+  newest-by-date tags are frequently unrelated branches or test tags.
+- `POLL=1` marks a package with no webhook option at all - `SOURCE` is
+  still the repo's endpoint (for humans reading the file), but resolution
+  goes through `NVCHECKER_URL` + `NVCHECKER_REGEX` instead
+  ([nvchecker](https://github.com/lilydjwg/nvchecker)'s `regex` source
+  fields exactly - fetch the URL, take the max of every match of the
+  regex). Checked by `poll.yml` on a cron instead of a webhook.
+  `wofi`/`libtraceevent` are the current examples - hg.sr.ht and cgit
+  instances have no API for anything to watch.
+
+`resolve_kernel_cgit_version()` (`scripts/lib.sh`) also exists as a
+bespoke scraper alternative to `nvchecker`'s regex source for cgit
+specifically - not used by any `packages/*.conf` (nvchecker covers that
+case fine), but kept since `image-deps.yml` calls it directly for a
+non-SBo-package dependency (see "Image" below).
 
 `GENERATOR` defaults to `tarball` (download the source archive, compute its
 md5, done) and only needs to be set explicitly for `rust`/`rust64` (crate
 list regenerated via `scripts/rust-info.sh`/`rust64-info.sh`).
-
-`SOURCE` selects how the latest version is resolved:
-
-- `github` (needs `GITHUB_REPO`) or `codeberg` (needs `CODEBERG_REPO`) -
-  webhook-able via newreleases.io, checked by `webhook.yml`. Both take
-  `TAG_REGEX` (anchored, capture group 1 = version).
-- `nvchecker` (needs `NVCHECKER_URL` + `NVCHECKER_REGEX`, [nvchecker](https://github.com/lilydjwg/nvchecker)'s
-  `regex` source fields exactly - fetch the URL, take the max of every
-  match of the regex) - for sources with no API at all (hg.sr.ht,
-  cgit instances), so no webhook is possible. Checked by `poll.yml`
-  on a cron instead. `wofi`/`libtraceevent` are the current examples.
-
-`kernel-cgit` (needs `CGIT_URL`) and `sourcehut-hg` (needs `SRHT_REPO`)
-also exist as bespoke-scraper alternatives to `nvchecker` (see
-`scripts/lib.sh`) - not currently used by any `packages/*.conf`, but kept
-since `image-deps.yml` uses the cgit one directly for a non-SBo-package
-dependency (see "Image" below), and either avoids the Python/nvchecker
-dependency if that's ever preferred for a new package.
 
 Freezing a package (e.g. blocked on a Slackware/glibc version) adds:
 
@@ -147,8 +154,8 @@ tracked project, or manually via `workflow_dispatch`.
 
 The webhook payload names which project changed
 (`client_payload.project`), so a firing is scoped to just that one
-package (mapped back to a `prgnam` via `GITHUB_REPO`/`CODEBERG_REPO` in
-`packages/*.conf`) instead of re-checking everything. It still goes
+package (mapped back to a `prgnam` by matching `SOURCE`'s `owner/repo`
+in `packages/*.conf`) instead of re-checking everything. It still goes
 through the `detect` action's normal resolution and `TAG_REGEX` filtering rather
 than trusting the webhook's own version field - that filter exists
 precisely because raw upstream signals (test tags, LTS backports, etc.)
@@ -156,8 +163,8 @@ aren't trustworthy on their own; the webhook only saves re-checking
 *every other* package. If the payload is missing or names a project no
 `.conf` matches (manual dispatch with no `package` input, or a
 misconfigured webhook), it falls back to checking every *webhook-able*
-(`github`/`codeberg`) package - excluding `SOURCE=nvchecker` ones, which
-have no webhook option at all and are `poll.yml`'s job instead
+(github.com/codeberg.org `SOURCE`) package - excluding `POLL=1` ones,
+which have no webhook option at all and are `poll.yml`'s job instead
 (below).
 
 **Webhook payload template** (newreleases.io → your webhook → payload
@@ -176,20 +183,19 @@ below:
 
 `{project}` is newreleases.io's own template variable, filled in with the
 `provider/name` of whichever tracked project fired (e.g. `jj-vcs/jj`) -
-matching the `GITHUB_REPO`/`CODEBERG_REPO` value in that package's
-`.conf` file exactly.
+matching the `owner/repo` path of that package's `SOURCE` URL exactly.
 
 No cron here: every package `webhook.yml` handles is webhook-covered. The
 one place a cron actually belongs is `poll.yml`, split out for
 exactly the packages a webhook *can't* reach:
 
 - **`poll.yml`** (weekly cron + `workflow_dispatch`) checks every
-  `SOURCE=nvchecker` package - `wofi` (hg.sr.ht) and `libtraceevent`
+  `POLL=1` package - `wofi` (hg.sr.ht) and `libtraceevent`
   (git.kernel.org/cgit) currently. Neither hosts an API of any kind for a
   service like newreleases.io to watch, so polling is the only option.
   It installs [nvchecker](https://github.com/lilydjwg/nvchecker) itself,
   finds the poll-based packages by grepping `packages/*.conf` for
-  `SOURCE=nvchecker`, then reuses the exact same `detect` +
+  `POLL=1`, then reuses the exact same `detect` +
   `open-update-prs` actions as `webhook.yml` - push vs. pull only changes
   *how a package's turn to be checked comes up*, not what happens once it
   is.

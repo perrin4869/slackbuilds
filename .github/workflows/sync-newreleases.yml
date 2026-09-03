@@ -58,18 +58,24 @@ jobs:
               log "$PRGNAM: frozen, not tracking on newreleases.io"
               continue
             fi
-            if [ "$SOURCE" != github ]; then
-              log "$PRGNAM: SOURCE=$SOURCE not supported by newreleases.io sync"
+            if [ "${POLL:-0}" = "1" ]; then
+              log "$PRGNAM: POLL=1, no webhook option - not tracking on newreleases.io"
+              continue
+            fi
+            if [[ "$SOURCE" != https://github.com/* ]]; then
+              log "$PRGNAM: SOURCE=$SOURCE not supported by newreleases.io sync (only github.com currently)"
               continue
             fi
 
+            github_repo="$(repo_path_from_url "$SOURCE")"
+
             existing="$(printf '%s' "$existing_json" \
-              | jq -r --arg name "$GITHUB_REPO" '.projects[]? | select(.provider=="github" and .name==$name)')"
+              | jq -r --arg name "$github_repo" '.projects[]? | select(.provider=="github" and .name==$name)')"
 
             if [ -z "$existing" ]; then
-              log "$PRGNAM: adding $GITHUB_REPO to newreleases.io"
+              log "$PRGNAM: adding $github_repo to newreleases.io"
               nr_api POST /projects "$(jq -n \
-                  --arg name "$GITHUB_REPO" --arg hook "$NEWRELEASES_WEBHOOK_ID" \
+                  --arg name "$github_repo" --arg hook "$NEWRELEASES_WEBHOOK_ID" \
                   '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')" \
                 | jq -e '.project // empty' >/dev/null \
                 || log "warn: $PRGNAM: add failed: $(nr_api POST /projects "{}" 2>&1 | head -c 200)"
@@ -79,7 +85,7 @@ jobs:
             id="$(printf '%s' "$existing" | jq -r '.id')"
             has_hook="$(printf '%s' "$existing" | jq -r --arg h "$NEWRELEASES_WEBHOOK_ID" '(.webhooks // []) | index($h) != null')"
             if [ "$has_hook" != "true" ]; then
-              log "$PRGNAM: attaching webhook to existing project $GITHUB_REPO"
+              log "$PRGNAM: attaching webhook to existing project $github_repo"
               hooks="$(printf '%s' "$existing" | jq -c --arg h "$NEWRELEASES_WEBHOOK_ID" '(.webhooks // []) + [$h]')"
               nr_api POST "/projects/${id}" "$(jq -n --argjson hooks "$hooks" '{webhooks: $hooks}')" >/dev/null
             else

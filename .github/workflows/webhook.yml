@@ -9,7 +9,7 @@ on:
     types: [upstream-release]
   # No cron: this workflow only ever checks webhook-able (github/codeberg)
   # packages - see "Determine target package" below. Packages with no
-  # webhook option at all (SOURCE=nvchecker) are poll.yml's job.
+  # webhook option at all (POLL=1) are poll.yml's job.
   workflow_dispatch:
     inputs:
       package:
@@ -39,10 +39,10 @@ jobs:
           PROJECT: ${{ github.event.client_payload.project }}
         run: |
           set -euo pipefail
-          # Every packages/*.conf except SOURCE=nvchecker ones - those have
+          # Every packages/*.conf except POLL=1 ones - those have
           # no webhook option and are poll.yml's job (it doesn't install
           # nvchecker here, and doesn't need to).
-          all_webhookable="$(grep -L '^SOURCE=nvchecker$' packages/*.conf \
+          all_webhookable="$(grep -L '^POLL=1$' packages/*.conf \
             | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
 
           if [ -n "${{ github.event.inputs.package }}" ]; then

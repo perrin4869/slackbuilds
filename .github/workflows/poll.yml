@@ -3,7 +3,7 @@ name: Poll for updates
 
 on:
   schedule:
-    # The only packages checked here (SOURCE=nvchecker) have no webhook
+    # The only packages checked here (POLL=1) have no webhook
     # option at all - hg.sr.ht and git.kernel.org (cgit) expose no API for
     # newreleases.io, or anything else, to watch. Polling is the only way.
     - cron: '35 7 * * 1' # weekly - these change rarely
@@ -19,10 +19,19 @@ permissions:
 
 jobs:
   poll:
-    name: Poll + open update PRs (SOURCE=nvchecker)
+    name: Poll + open update PRs (POLL=1)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+
+      # ubuntu-24.04 ships Python 3.12 + pip already, but pin it explicitly
+      # rather than relying on whatever the runner image happens to bundle.
+      # No cache: pip - that requires a requirements.txt/pyproject.toml to
+      # key the cache on (verified: fails hard without one), and adding one
+      # just for a single `pip install nvchecker` isn't worth it.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
 
       - name: Install nvchecker
         run: pip install --break-system-packages nvchecker
@@ -31,7 +40,7 @@ jobs:
         id: list
         run: |
           set -euo pipefail
-          packages="$(grep -l '^SOURCE=nvchecker$' packages/*.conf \
+          packages="$(grep -l '^POLL=1$' packages/*.conf \
             | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
