@@ -30,16 +30,26 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
-        while read -r status prgnam category version; do
-            [ "$status" = NEEDS_UPDATE ] || continue
+        # A subshell (the parens - not just a function), so generate_package
+        # calling die() only exits this one package's attempt, not the whole
+        # loop under set -e: one package failing to open a PR (e.g. a
+        # transient network failure downloading its tarball) shouldn't take
+        # every other package in the same batch down with it.
+        open_update_pr() (
+            set -euo pipefail
+            prgnam="$1" category="$2" version="$3"
+
+            # git checkout persists to the real repo even from inside this
+            # subshell (verified) - always start from a clean master,
+            # regardless of what branch a previous package's attempt left
+            # checked out (including a failed one).
+            git checkout --quiet master
 
             branch="update/${prgnam}-${version}"
-            echo "::group::${prgnam} -> ${version}"
 
             git fetch origin "$branch" 2>/dev/null && {
                 echo "branch $branch already exists, skipping"
-                echo "::endgroup::"
-                continue
+                exit 0
             }
 
             upstream_dir="$(mktemp -d)"
@@ -73,8 +83,20 @@ runs:
                 --title "${category}/${prgnam}: Updated for version ${version}" \
                 --body-file /tmp/pr-body.md \
                 --head "$branch" --base master
+        )
 
-            git checkout -
-            rm -rf "$upstream_dir"
+        failed=""
+        while read -r status prgnam category version; do
+            [ "$status" = NEEDS_UPDATE ] || continue
+
+            echo "::group::${prgnam} -> ${version}"
+            if ! open_update_pr "$prgnam" "$category" "$version"; then
+                echo "::error::failed to open update PR for $prgnam - see log above"
+                failed+="$prgnam "
+            fi
             echo "::endgroup::"
         done <<< "$DETECT_OUTPUT"
+
+        if [ -n "$failed" ]; then
+            die "failed to open update PRs for:$failed(see log above)"
+        fi

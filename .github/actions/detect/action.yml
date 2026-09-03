@@ -27,17 +27,29 @@ runs:
         set -euo pipefail
         source scripts/lib.sh
 
+        # check_one is guarded with `||` per-package: it can die() (a
+        # malformed .conf, a missing required field), and since that runs
+        # via command substitution in a plain assignment, an unguarded
+        # failure would abort this whole loop under set -e - one bad
+        # package would silently take every other package's result with
+        # it. Caught here instead, reported as its own line.
         result=""
         if [ -n "$PACKAGES" ]; then
           for prgnam in $PACKAGES; do
             conf="packages/$prgnam.conf"
-            [ -f "$conf" ] || die "no such package config: $conf"
-            result+="$(check_one "$conf")"$'\n'
+            if [ ! -f "$conf" ]; then
+              result+="UNRESOLVED $prgnam (no such package config: $conf)"$'\n'
+              continue
+            fi
+            line="$(check_one "$conf")" || line="UNRESOLVED $prgnam (check failed - see log)"
+            result+="$line"$'\n'
           done
         else
           for conf in packages/*.conf; do
             [ -e "$conf" ] || continue
-            result+="$(check_one "$conf")"$'\n'
+            prgnam="$(basename "$conf" .conf)"
+            line="$(check_one "$conf")" || line="UNRESOLVED $prgnam (check failed - see log)"
+            result+="$line"$'\n'
           done
         fi
 

@@ -50,21 +50,27 @@ jobs:
           log "fetching currently tracked projects"
           existing_json="$(nr_api GET /projects)"
 
-          for conf in packages/*.conf; do
-            [ -e "$conf" ] || continue
+          # A subshell: load_package_conf can die() (a malformed .conf), and
+          # since this loop's job already runs continue-on-error at the
+          # workflow level, an unguarded die() here wouldn't just skip one
+          # package - it'd abort the whole loop while still reporting the
+          # job as fine, silently skipping every remaining package too.
+          sync_one() (
+            set -euo pipefail
+            conf="$1"
             load_package_conf "$conf"
 
             if [ "${FROZEN:-0}" = "1" ]; then
               log "$PRGNAM: frozen, not tracking on newreleases.io"
-              continue
+              exit 0
             fi
             if [ "${POLL:-0}" = "1" ]; then
               log "$PRGNAM: POLL=1, no webhook option - not tracking on newreleases.io"
-              continue
+              exit 0
             fi
             if [[ "$SOURCE" != https://github.com/* ]]; then
               log "$PRGNAM: SOURCE=$SOURCE not supported by newreleases.io sync (only github.com currently)"
-              continue
+              exit 0
             fi
 
             github_repo="$(repo_path_from_url "$SOURCE")"
@@ -79,7 +85,7 @@ jobs:
                   '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')" \
                 | jq -e '.project // empty' >/dev/null \
                 || log "warn: $PRGNAM: add failed: $(nr_api POST /projects "{}" 2>&1 | head -c 200)"
-              continue
+              exit 0
             fi
 
             id="$(printf '%s' "$existing" | jq -r '.id')"
@@ -91,4 +97,9 @@ jobs:
             else
               log "$PRGNAM: already tracked with webhook attached"
             fi
+          )
+
+          for conf in packages/*.conf; do
+            [ -e "$conf" ] || continue
+            sync_one "$conf" || log "warn: $conf: sync failed - see log above"
           done

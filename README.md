@@ -56,7 +56,7 @@ loop. Anything else lives directly in the workflow that calls it, or as a
 composite action if more than one workflow needs it.
 
 - `packages/<prgnam>.conf` - one file per tracked package: category, upstream
-  source, tag-matching regex, generator kind (`tarball`, the default, or
+  source, tag-matching regex, `STRATEGY` (`tarball`, the default, or
   `rust`/`rust64`), and `FROZEN=1` for packages that can't be updated right
   now (see below).
 - `scripts/lib.sh` - shared helpers, sourced by every workflow/action that
@@ -76,6 +76,15 @@ composite action if more than one workflow needs it.
 - `.github/actions/open-update-prs` - given `detect`'s output, opens an
   update PR for every `NEEDS_UPDATE` line. Also a composite action for the
   same reason - shared by `webhook.yml` and `poll.yml`.
+
+Every per-package loop (`detect`, `open-update-prs`, `sync-newreleases.yml`)
+wraps its per-iteration body in a subshell (`name() ( ... )`, parens not
+braces) rather than calling it as a plain function or inline. `die()`
+(a malformed `.conf`, a missing field) exits the whole process it runs
+in - called directly, or via a plain function, that would abort the
+*entire* loop under `set -e`, silently skipping every remaining package
+while still reporting the job as fine. In a subshell, `exit 1` only ends
+that one package's attempt; the caller catches it with `||` and moves on.
 
 `detect`'s output (and `open-update-prs`'s `detect-output` input) carries
 data that ultimately derives from upstream tag names, not just this
@@ -132,7 +141,7 @@ specifically - not used by any `packages/*.conf` (nvchecker covers that
 case fine), but kept since `image-deps.yml` calls it directly for a
 non-SBo-package dependency (see "Image" below).
 
-`GENERATOR` defaults to `tarball` (download the source archive, compute its
+`STRATEGY` defaults to `tarball` (download the source archive, compute its
 md5, done) and only needs to be set explicitly for `rust`/`rust64` (crate
 list regenerated via `scripts/rust-info.sh`/`rust64-info.sh`).
 

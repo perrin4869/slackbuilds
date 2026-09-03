@@ -33,8 +33,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      # setup-python's own Python isn't the OS-managed one, so no
+      # --break-system-packages needed (verified) - a plain `pip install`
+      # would need it on the system Python, but not here.
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+
       - name: Install nvchecker
-        run: pip install --break-system-packages nvchecker
+        run: python -m pip install nvchecker
 
       - name: List poll-based packages
         id: list

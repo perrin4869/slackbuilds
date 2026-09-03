@@ -28,15 +28,15 @@ die() { log "error: $*"; exit 1; }
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        GENERATOR= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
+        STRATEGY= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"
     [ -n "$CATEGORY" ] || die "$conf: CATEGORY not set"
     [ -n "$SOURCE" ] || die "$conf: SOURCE not set"
     # Most packages are a single source tarball with no special vendoring -
-    # GENERATOR is only worth naming explicitly for the rust/rust64 case.
-    GENERATOR="${GENERATOR:-tarball}"
+    # STRATEGY is only worth naming explicitly for the rust/rust64 case.
+    STRATEGY="${STRATEGY:-tarball}"
 }
 
 # Strip a known host prefix off a github.com/codeberg.org SOURCE URL,
@@ -377,7 +377,7 @@ generate_package() {
     archive="$(subst_version "$ARCHIVE" "$version")"
     prgdir="$(subst_version "$PRGDIR" "$version")"
 
-    case "$GENERATOR" in
+    case "$STRATEGY" in
         tarball)
             local homepage requires maintainer email archive_path md5
             homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
@@ -412,7 +412,7 @@ EOF
             email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
 
             rust_script="scripts/rust-info.sh"
-            [ "$GENERATOR" = rust64 ] && rust_script="scripts/rust64-info.sh"
+            [ "$STRATEGY" = rust64 ] && rust_script="scripts/rust64-info.sh"
 
             (
                 cd "$workdir"
@@ -426,7 +426,7 @@ EOF
             ;;
 
         *)
-            die "$PRGNAM: unknown GENERATOR=$GENERATOR"
+            die "$PRGNAM: unknown STRATEGY=$STRATEGY"
             ;;
     esac
 
