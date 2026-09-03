@@ -1,0 +1,90 @@
+---
+name: Open update PR
+
+# Reusable, not a composite action: it needs its own job (create-pull-request
+# needs the change already made in the workspace, and this needs to run as an
+# isolated matrix job - one runner, one package - so a package failing to
+# regenerate or push doesn't affect any other package's job at all, with no
+# subshell/resilience plumbing needed for that isolation). Called once per
+# NEEDS_UPDATE line, fanned out via `strategy: matrix` at the call site in
+# webhook.yml / poll.yml.
+
+on:
+  workflow_call:
+    inputs:
+      prgnam:
+        required: true
+        type: string
+      category:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open-pr:
+    name: ${{ inputs.prgnam }} -> ${{ inputs.version }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Regenerate package
+        env:
+          # Passed via env, not interpolated into the script body - version
+          # ultimately derives from upstream tag data, not just our own
+          # packages/*.conf. See the security note in the repo README.
+          INPUT_PRGNAM: ${{ inputs.prgnam }}
+          INPUT_CATEGORY: ${{ inputs.category }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          # Lowercase locals, deliberately not PRGNAM/CATEGORY/VERSION -
+          # generate_package/render_pr_body call load_package_conf, which
+          # resets and re-sources those exact uppercase globals from the
+          # package's .conf. Using the same names here would get silently
+          # clobbered with the .conf's OLD values right after the first
+          # call (verified: it happened when this used uppercase names).
+          prgnam="$INPUT_PRGNAM" category="$INPUT_CATEGORY" version="$INPUT_VERSION"
+
+          upstream_dir="$(mktemp -d)"
+          git clone --quiet --depth 1 --branch master \
+              https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
+          upstream_sha="$(git -C "$upstream_dir" rev-parse HEAD)"
+
+          rm -rf "${category}/${prgnam}"
+          mkdir -p "${category}/${prgnam}"
+          generate_package "$prgnam" "$version" "$upstream_dir" "${category}/${prgnam}"
+
+          render_pr_body "$prgnam" "$version" > /tmp/pr-body.md
+
+          cat > "${category}/${prgnam}/UPDATE.json" <<EOF
+          {
+            "prgnam": "$prgnam",
+            "category": "$category",
+            "version": "$version",
+            "upstream_sha": "$upstream_sha"
+          }
+          EOF
+
+          sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
+
+      - name: Open update PR
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          title: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
+          commit-message: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
+          body-path: /tmp/pr-body.md
+          branch: update/${{ inputs.prgnam }}-${{ inputs.version }}
+          base: master
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          add-paths: |
+            ${{ inputs.category }}/${{ inputs.prgnam }}
+            packages/${{ inputs.prgnam }}.conf

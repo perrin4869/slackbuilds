@@ -9,7 +9,7 @@ on:
     types: [upstream-release]
   # No cron, and no fallback scan for a missing/unmatched payload either -
   # this workflow only ever checks a version it's already been given.
-  # Scanning (the detect action, TAG_REGEX candidate lists, nvchecker) is
+  # Scanning (the detect step, TAG_REGEX candidate lists, nvchecker) is
   # poll.yml's job alone, on its own schedule - including an ad hoc check
   # of a single package via poll.yml's own workflow_dispatch.
   workflow_dispatch:
@@ -25,14 +25,12 @@ concurrency:
   group: webhook
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   webhook:
-    name: React to release webhook + open update PRs
+    name: React to release webhook
     runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
 
@@ -114,8 +112,34 @@ jobs:
             done <<< "$DETECT_OUTPUT"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Open update PRs
-        uses: ./.github/actions/open-update-prs
-        with:
-          detect-output: ${{ steps.detect.outputs.result }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Turns the NEEDS_UPDATE lines in $DETECT_OUTPUT into a JSON array
+      # for the open-update-prs job's `strategy: matrix` below - one
+      # element per package that needs a PR opened.
+      - name: Build PR matrix
+        id: matrix
+        env:
+          DETECT_OUTPUT: ${{ steps.detect.outputs.result }}
+        run: |
+          set -euo pipefail
+          matrix='[]'
+          while IFS=' ' read -r status prgnam category version; do
+            [ "$status" = NEEDS_UPDATE ] || continue
+            matrix="$(jq -c \
+              --arg prgnam "$prgnam" --arg category "$category" --arg version "$version" \
+              '. + [{prgnam: $prgnam, category: $category, version: $version}]' \
+              <<< "$matrix")"
+          done <<< "$DETECT_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  open-update-prs:
+    needs: webhook
+    if: needs.webhook.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.webhook.outputs.matrix) }}
+    uses: ./.github/workflows/open-update-prs.yml
+    with:
+      prgnam: ${{ matrix.prgnam }}
+      category: ${{ matrix.category }}
+      version: ${{ matrix.version }}

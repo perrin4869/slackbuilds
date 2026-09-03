@@ -48,31 +48,40 @@ upstream PR if upstream moved in the meantime.
 
 ## Layout
 
-Scripts are used sparingly, and only where they genuinely have to be: a
-few functions need to be callable from *inside a loop* (once per detected
-update), which a reusable GitHub Action can't be - actions are static
-workflow steps, not something you invoke dynamically from within a bash
-loop. Anything else lives directly in the workflow that calls it, or as a
-composite action if more than one workflow needs it.
+Scripts are used sparingly, and only where they genuinely have to be.
+Some functions need to be callable from *inside a bash loop* (`poll.yml`'s
+own Detect step, `sync-newreleases.yml`), which a reusable GitHub Action
+can't be - actions are static workflow steps, not something you invoke
+dynamically from within a loop. Others are called from more than one
+*workflow file*, each just once per job - a plain function still, not
+because of the loop constraint, but because there's no single shared job
+to factor them into (see `generate_package()`/`render_pr_body()` below).
+Anything else lives directly in the workflow that calls it, or as a
+reusable workflow if more than one workflow needs the whole job.
 
 - `packages/<prgnam>.conf` - one file per tracked package: category, upstream
   source, tag-matching regex, `STRATEGY` (`tarball`, the default, or
   `rust`/`rust64`), and `FROZEN=1` for packages that can't be updated right
   now (see below).
-- `scripts/lib.sh` - shared helpers, sourced by every workflow/action that
-  needs them: version resolvers per `SOURCE` type, `.info` parsing,
+- `scripts/lib.sh` - shared helpers, sourced by every workflow that needs
+  them: version resolvers per `SOURCE` type, `.info` parsing,
   `generate_package()` (regenerates `.info`+`.SlackBuild` from a fresh
-  upstream checkout) and `render_pr_body()` - both called once per
-  detected update from inside `open-update-prs`'s loop and (the former)
-  again from `submit.yml`, so they have to be plain functions, not actions.
+  upstream checkout) and `render_pr_body()` - each called once per job,
+  but from two different workflow files (`open-update-prs.yml`'s step and
+  `submit.yml`'s), so they stay plain functions rather than one workflow
+  owning them.
 - `scripts/rust-info.sh` / `rust64-info.sh` - unchanged crate-list generators
   for Rust packages (originally run by hand; see `generate_package()`'s
   `rust`/`rust64` case for the invocation). Kept as real scripts, not
   functions - substantial standalone tools in their own right, not glue.
-- `.github/actions/open-update-prs` - given a `detect`-shaped output (one
-  line per package - see `check_result()` in `scripts/lib.sh`), opens an
-  update PR for every `NEEDS_UPDATE` line. A composite action because
-  it's called from both `webhook.yml` and `poll.yml`.
+- `.github/workflows/open-update-prs.yml` - a *reusable* workflow
+  (`on: workflow_call`, inputs `prgnam`/`category`/`version`), called once
+  per `NEEDS_UPDATE` line by both `webhook.yml` and `poll.yml`. It
+  regenerates the package (`generate_package()`), then hands the result
+  to [`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request)
+  to branch/commit/push/open (or update) the PR - see "Opening the PR"
+  below for why that's a marketplace action here and not our own
+  git/`gh` plumbing.
 
 There's deliberately no `detect` action - `poll.yml` is the only workflow
 that resolves a version by scanning (`check_one()`, via `resolve_latest()`),
@@ -84,24 +93,59 @@ call the same `check_result()` to decide FROZEN/UP_TO_DATE/NEEDS_UPDATE
 and format the output line; only how the candidate version was obtained
 differs.
 
-Every per-package loop (`poll.yml`'s Detect step, `open-update-prs`,
-`sync-newreleases.yml`) wraps its per-iteration body in a subshell
-(`name() ( ... )`, parens not braces) rather than calling it as a plain
-function or inline. `die()` (a malformed `.conf`, a missing field) exits
-the whole process it runs in - called directly, or via a plain function,
-that would abort the *entire* loop under `set -e`, silently skipping
-every remaining package while still reporting the job as fine. In a
-subshell, `exit 1` only ends that one package's attempt; the caller
-catches it with `||` and moves on.
+Both workflows turn their `check_one`/`check_known` output into a JSON
+array of `{prgnam, category, version}` (one per `NEEDS_UPDATE` line) and
+call `open-update-prs.yml` via `strategy: matrix` - one isolated job per
+package, run on its own runner. That isolation is what makes a
+subshell-resilience pattern unnecessary there: a runner-level failure in
+one package's job (a `die()`, a network blip regenerating it) can't
+affect any other package's job at all, matrix jobs don't share process
+state the way a bash loop's iterations do. `poll.yml`'s own Detect step
+and `sync-newreleases.yml` still loop over packages *within* one job, so
+they still wrap each iteration in a subshell (`name() ( ... )`, parens
+not braces) for the same reason established earlier in this file: `die()`
+called directly, or via a plain function, aborts the *entire* loop under
+`set -e`, silently skipping every remaining package while still
+reporting the job as fine. In a subshell, `exit 1` only ends that one
+iteration; the caller catches it with `||` and moves on.
 
-`detect`-shaped output (and `open-update-prs`'s `detect-output` input)
-carries data that ultimately derives from upstream tag names, not just
-this repo's own config - so callers pass it via `env:` rather than
-interpolating `${{ }}` directly into a `run:` script body. The latter is
-a real GitHub Actions footgun: `${{ }}` in a `run:` block is substituted
-as raw text *before* the shell parses it, so untrusted content there can
-break out of the intended command. An `env:` value becomes a plain
-environment variable instead - substituted once, read safely as `"$VAR"`.
+`detect`-shaped output (and the JSON matrix built from it) carries data
+that ultimately derives from upstream tag names, not just this repo's
+own config - so callers pass it via `env:` rather than interpolating
+`${{ }}` directly into a `run:` script body. The latter is a real GitHub
+Actions footgun: `${{ }}` in a `run:` block is substituted as raw text
+*before* the shell parses it, so untrusted content there can break out
+of the intended command. An `env:` value becomes a plain environment
+variable instead - substituted once, read safely as `"$VAR"`. (Passing
+the same data as a job/action *input*, as `open-update-prs.yml`'s
+`prgnam`/`category`/`version` or `create-pull-request`'s `with:` fields
+do, is fine either way - the runner delivers those as plain strings, not
+something the shell re-parses.)
+
+**Opening the PR**: `open-update-prs.yml`'s own `run:` step only
+regenerates the package into the checkout (`generate_package()`,
+`render_pr_body()`, the `VERSION` bump, `UPDATE.json`) - branching,
+committing, pushing, and creating (or updating) the PR itself is
+`peter-evans/create-pull-request`, not custom git/`gh` plumbing. It
+already handles what used to be hand-rolled here: if a branch for that
+exact `prgnam`/`version` already exists with no differences from what
+was just regenerated, it's a no-op (no needless push, no PR churn); if
+the branch doesn't exist yet, it creates one and opens the PR. One
+caveat worth noting because it's easy to forget: its `committer`/`author`
+inputs are set explicitly to the same `github-actions[bot]` identity
+regardless of what triggered the run - its own defaults would otherwise
+vary (`author` defaults to whoever/whatever triggered the workflow,
+which differs between a webhook `repository_dispatch`, a `poll.yml` cron,
+and a manual `workflow_dispatch`).
+
+A local variable-naming trap worth documenting since it silently
+produced wrong output once, verified while writing this: `generate_package`/
+`render_pr_body` call `load_package_conf`, which resets and re-sources
+`PRGNAM`/`CATEGORY`/`VERSION` (and friends) from the package's `.conf`.
+`open-update-prs.yml`'s own step copies its inputs into **lowercase**
+locals (`prgnam`/`category`/`version`) before calling either function,
+specifically so its own tracking variables don't share a name with (and
+get silently overwritten by) those globals right after the first call.
 
 - `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild` at
   its real upstream path (e.g. `libraries/tree-sitter/`), plus an
