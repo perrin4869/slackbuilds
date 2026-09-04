@@ -59,10 +59,14 @@ jobs:
           git commit --quiet -m "Dockerfile: bump sbopkg to ${latest}"
           git push --quiet origin "HEAD:refs/heads/${branch}"
 
+          # Not hardcoded "master" - fetched live, same reasoning as
+          # open-update-prs.yml's equivalent step.
+          default_branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef -q .defaultBranchRef.name)"
+
           gh pr create \
             --title "Dockerfile: bump sbopkg to ${latest}" \
             --body "sbopkg ${latest} released (was ${current}). Merging rebuilds and pushes ghcr.io/perrin4869/slackbuilds:15.0 automatically." \
-            --head "$branch" --base master
+            --head "$branch" --base "$default_branch"
 
   sbo-maintainer-tools:
     name: sbo-maintainer-tools

@@ -65,6 +65,21 @@ jobs:
 
           sed -i "s/^VERSION=.*/VERSION=$version/" "packages/${prgnam}.conf"
 
+      # Not hardcoded "master" - fetched live so this still works if the
+      # default branch is ever renamed (or, more immediately: while this
+      # pipeline's own PR is still open and unmerged, its infrastructure
+      # only exists on that branch, not on whatever's normally the
+      # default - so this has to track whatever the default branch
+      # actually is, not assume a literal name.
+      - name: Determine default branch
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          default_branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef -q .defaultBranchRef.name)"
+          echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
+
       - name: Open update PR
         uses: peter-evans/create-pull-request@v8.1.1
         with:
@@ -72,7 +87,7 @@ jobs:
           commit-message: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
           body-path: /tmp/pr-body.md
           branch: update/${{ inputs.prgnam }}-${{ inputs.version }}
-          base: master
+          base: ${{ steps.repo.outputs.default_branch }}
           committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           add-paths: |
