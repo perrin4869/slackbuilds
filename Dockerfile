@@ -1,10 +1,8 @@
 FROM vbatts/slackware:15.0
 MAINTAINER perrin4869 <julian@dotcore.co.il>
 
-ARG DEV_UID=1000
-ARG DEV_GID=1000
-ARG DEV_USER=limited
 ARG REPO="http://slackware.osuosl.org/slackware64-15.0/"
+ARG SBOPKG_VERSION="0.38.3"
 RUN echo "${REPO}" > /etc/slackpkg/mirrors
 RUN yes y | slackpkg update gpg && \
     slackpkg update && \
@@ -18,17 +16,13 @@ RUN update-ca-certificates --fresh
 
 RUN \
     mkdir -p /tmp/install && cd /tmp/install && \
-    wget -c https://github.com/sbopkg/sbopkg/releases/download/0.38.2/sbopkg-0.38.2-noarch-1_wsr.tgz && \
-    installpkg sbopkg-0.38.2-noarch-1_wsr.tgz
+    wget -c "https://github.com/sbopkg/sbopkg/releases/download/${SBOPKG_VERSION}/sbopkg-${SBOPKG_VERSION}-noarch-1_wsr.tgz" && \
+    installpkg "sbopkg-${SBOPKG_VERSION}-noarch-1_wsr.tgz"
 
 RUN sbopkg -r
+RUN sqg -a
+RUN sbopkg -B -i sbo-maintainer-tools
 
-RUN groupadd -g "${DEV_GID}" "${DEV_USER}" ; \
-    useradd -m -u "${DEV_UID}" -g "${DEV_GID}" -G wheel "${DEV_USER}" && \
-    sed -ri 's/^# (%wheel.*NOPASSWD.*)$/\1/' /etc/sudoers
-
-USER "${DEV_USER}"
-ENV HOME /home/"${DEV_USER}"
-WORKDIR /home/"${DEV_USER}"
+WORKDIR /root
 
 CMD bash -l

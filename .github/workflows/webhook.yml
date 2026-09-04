@@ -1,0 +1,152 @@
+---
+name: Release webhook
+
+on:
+  # We don't scan for anything here - newreleases.io already resolved the
+  # version and is telling us via webhook. See "Determine target package"
+  # below for what we still verify ourselves even so.
+  repository_dispatch:
+    types: [upstream-release]
+  # No cron, and no fallback scan for a missing/unmatched payload either -
+  # this workflow only ever checks a version it's already been given.
+  # Scanning (the detect step, TAG_REGEX candidate lists, nvchecker) is
+  # poll.yml's job alone, on its own schedule - including an ad hoc check
+  # of a single package via poll.yml's own workflow_dispatch.
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to check (PRGNAM) - simulates a webhook firing for it'
+        required: true
+      version:
+        description: "Version to check - simulates the webhook payload's own version field"
+        required: true
+
+concurrency:
+  group: webhook
+  cancel-in-progress: false
+
+jobs:
+  webhook:
+    name: React to release webhook
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Determine target package
+        id: target
+        env:
+          # Only set for repository_dispatch, and only if the webhook was
+          # configured with the client_payload template - see README.
+          PROJECT: ${{ github.event.client_payload.project }}
+          WEBHOOK_VERSION: ${{ github.event.client_payload.version }}
+          DISPATCH_PACKAGE: ${{ github.event.inputs.package }}
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$DISPATCH_PACKAGE" ]; then
+            package="$DISPATCH_PACKAGE"
+            version="$DISPATCH_VERSION"
+          elif [ -n "$PROJECT" ]; then
+            source scripts/lib.sh
+            package="$(find_package_by_repo "$PROJECT")"
+            if [ -n "$package" ]; then
+              echo "webhook names $PROJECT -> scoping to $package"
+              version="$WEBHOOK_VERSION"
+            else
+              echo "::warning::webhook names $PROJECT, no packages/*.conf matches it - nothing to check (add a packages/*.conf for it, or fix sync-newreleases.yml's tracked-project list)"
+              package=""
+              version=""
+            fi
+          else
+            echo "::error::no client_payload.project and no package input - nothing to check"
+            exit 1
+          fi
+
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check known version
+        id: detect
+        env:
+          PACKAGE: ${{ steps.target.outputs.package }}
+          # Passed via env, not interpolated into the script body - this
+          # ultimately derives from upstream tag data, not just our own
+          # packages/*.conf. See the security note in the repo README.
+          VERSION: ${{ steps.target.outputs.version }}
+          # check_known -> check_result calls upstream_version() and
+          # already_pending(), both of which shell out to `gh` - without
+          # this, every real (non-empty-package) invocation fails on
+          # unauthenticated gh api/gh pr list calls.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          result=""
+          if [ -n "$PACKAGE" ]; then
+            conf="packages/${PACKAGE}.conf"
+            if [ ! -f "$conf" ]; then
+              result="UNRESOLVED $PACKAGE (no such package config: $conf)"
+            else
+              result="$(check_known "$conf" "$VERSION")" || result="UNRESOLVED $PACKAGE (check failed - see log)"
+            fi
+          fi
+
+          {
+            echo "result<<GHADETECTEOF"
+            printf '%s\n' "$result"
+            echo "GHADETECTEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        env:
+          DETECT_OUTPUT: ${{ steps.detect.outputs.result }}
+        run: |
+          {
+            echo '## Release webhook'
+            echo
+            echo '| status | package | detail |'
+            echo '|---|---|---|'
+            while IFS=' ' read -r status prgnam rest; do
+              [ -n "$status" ] || continue
+              printf '| %s | %s | %s |\n' "$status" "$prgnam" "$rest"
+            done <<< "$DETECT_OUTPUT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Turns the NEEDS_UPDATE lines in $DETECT_OUTPUT into a JSON array
+      # for the open-update-prs job's `strategy: matrix` below - one
+      # element per package that needs a PR opened.
+      - name: Build PR matrix
+        id: matrix
+        env:
+          DETECT_OUTPUT: ${{ steps.detect.outputs.result }}
+        run: |
+          set -euo pipefail
+          matrix='[]'
+          while IFS=' ' read -r status prgnam category version; do
+            [ "$status" = NEEDS_UPDATE ] || continue
+            matrix="$(jq -c \
+              --arg prgnam "$prgnam" --arg category "$category" --arg version "$version" \
+              '. + [{prgnam: $prgnam, category: $category, version: $version}]' \
+              <<< "$matrix")"
+          done <<< "$DETECT_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  open-update-prs:
+    needs: webhook
+    if: needs.webhook.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.webhook.outputs.matrix) }}
+    uses: ./.github/workflows/open-update-prs.yml
+    with:
+      prgnam: ${{ matrix.prgnam }}
+      category: ${{ matrix.category }}
+      version: ${{ matrix.version }}
+    secrets:
+      SBO_UPDATE_PR_TOKEN: ${{ secrets.SBO_UPDATE_PR_TOKEN }}

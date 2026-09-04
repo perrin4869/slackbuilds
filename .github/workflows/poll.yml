@@ -1,0 +1,146 @@
+---
+name: Poll for updates
+
+on:
+  schedule:
+    # The only packages checked here (POLL=1) have no webhook
+    # option at all - hg.sr.ht and git.kernel.org (cgit) expose no API for
+    # newreleases.io, or anything else, to watch. Polling is the only way.
+    - cron: '35 7 * * 1' # weekly - these change rarely
+  workflow_dispatch:
+    inputs:
+      package:
+        description: >-
+          Single package to check (PRGNAM), any package - not just POLL=1
+          ones. Empty checks every POLL=1 package (the cron's own scope).
+          This is the only place left to scan a github/codeberg package
+          on demand - webhook.yml never scans, it only ever checks a
+          version it's already been given.
+        required: false
+
+concurrency:
+  group: poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    name: Poll for updates
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # ubuntu-24.04 ships Python 3.12 + pip already, but pin it explicitly
+      # rather than relying on whatever the runner image happens to bundle.
+      # No cache: pip - that requires a requirements.txt/pyproject.toml to
+      # key the cache on (verified: fails hard without one), and adding one
+      # just for a single `pip install nvchecker` isn't worth it.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # setup-python's own Python isn't the OS-managed one, so no
+      # --break-system-packages needed (verified) - a plain `pip install`
+      # would need it on the system Python, but not here.
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install nvchecker
+        run: python -m pip install nvchecker
+
+      - name: List packages to check
+        id: list
+        env:
+          DISPATCH_PACKAGE: ${{ github.event.inputs.package }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DISPATCH_PACKAGE" ]; then
+            packages="$DISPATCH_PACKAGE"
+          else
+            packages="$(grep -l '^POLL=1$' packages/*.conf \
+              | xargs -n1 basename | sed 's/\.conf$//' | tr '\n' ' ')"
+          fi
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Detect
+        id: detect
+        env:
+          PACKAGES: ${{ steps.list.outputs.packages }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          # check_one is guarded with `||` per-package: it can die() (a
+          # malformed .conf, a missing required field), and since that
+          # runs via command substitution in a plain assignment, an
+          # unguarded failure would abort this whole loop under set -e -
+          # one bad package would silently take every other package's
+          # result with it. Caught here instead, reported as its own line.
+          result=""
+          for prgnam in $PACKAGES; do
+            conf="packages/$prgnam.conf"
+            if [ ! -f "$conf" ]; then
+              result+="UNRESOLVED $prgnam (no such package config: $conf)"$'\n'
+              continue
+            fi
+            line="$(check_one "$conf")" || line="UNRESOLVED $prgnam (check failed - see log)"
+            result+="$line"$'\n'
+          done
+
+          {
+            echo "result<<GHADETECTEOF"
+            printf '%s' "$result"
+            echo "GHADETECTEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        env:
+          DETECT_OUTPUT: ${{ steps.detect.outputs.result }}
+        run: |
+          {
+            echo '## Poll results'
+            echo
+            echo '| status | package | detail |'
+            echo '|---|---|---|'
+            while IFS=' ' read -r status prgnam rest; do
+              [ -n "$status" ] || continue
+              printf '| %s | %s | %s |\n' "$status" "$prgnam" "$rest"
+            done <<< "$DETECT_OUTPUT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Turns the NEEDS_UPDATE lines in $DETECT_OUTPUT into a JSON array
+      # for the open-update-prs job's `strategy: matrix` below - one
+      # element per package that needs a PR opened.
+      - name: Build PR matrix
+        id: matrix
+        env:
+          DETECT_OUTPUT: ${{ steps.detect.outputs.result }}
+        run: |
+          set -euo pipefail
+          matrix='[]'
+          while IFS=' ' read -r status prgnam category version; do
+            [ "$status" = NEEDS_UPDATE ] || continue
+            matrix="$(jq -c \
+              --arg prgnam "$prgnam" --arg category "$category" --arg version "$version" \
+              '. + [{prgnam: $prgnam, category: $category, version: $version}]' \
+              <<< "$matrix")"
+          done <<< "$DETECT_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  open-update-prs:
+    needs: poll
+    if: needs.poll.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.poll.outputs.matrix) }}
+    uses: ./.github/workflows/open-update-prs.yml
+    with:
+      prgnam: ${{ matrix.prgnam }}
+      category: ${{ matrix.category }}
+      version: ${{ matrix.version }}
+    secrets:
+      SBO_UPDATE_PR_TOKEN: ${{ secrets.SBO_UPDATE_PR_TOKEN }}

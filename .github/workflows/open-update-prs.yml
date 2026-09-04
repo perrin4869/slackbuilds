@@ -1,0 +1,141 @@
+---
+name: Open update PR
+
+# Reusable, not a composite action: it needs its own job (create-pull-request
+# needs the change already made in the workspace, and this needs to run as an
+# isolated matrix job - one runner, one package - so a package failing to
+# regenerate or push doesn't affect any other package's job at all, with no
+# subshell/resilience plumbing needed for that isolation). Called once per
+# NEEDS_UPDATE line, fanned out via `strategy: matrix` at the call site in
+# webhook.yml / poll.yml.
+
+on:
+  workflow_call:
+    inputs:
+      prgnam:
+        required: true
+        type: string
+      category:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+    secrets:
+      SBO_UPDATE_PR_TOKEN:
+        required: true
+
+# contents stays read-only - the actual push/PR-create runs as
+# SBO_UPDATE_PR_TOKEN, precisely so the PR isn't opened by
+# github-actions[bot] (see that step's comment). pull-requests: write IS
+# needed for the default token, though - the Notify step posts its
+# comment as github-actions[bot] deliberately (a different actor than
+# the PR's own author), which needs this job's own token to have
+# comment-write access.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-pr:
+    name: ${{ inputs.prgnam }} -> ${{ inputs.version }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Regenerate package
+        env:
+          # Passed via env, not interpolated into the script body - version
+          # ultimately derives from upstream tag data, not just our own
+          # packages/*.conf. See the security note in the repo README.
+          INPUT_PRGNAM: ${{ inputs.prgnam }}
+          INPUT_CATEGORY: ${{ inputs.category }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          # Lowercase locals, deliberately not PRGNAM/CATEGORY/VERSION -
+          # generate_package/render_pr_body call load_package_conf, which
+          # resets and re-sources those exact uppercase globals from the
+          # package's .conf. Using the same names here would get silently
+          # clobbered with the .conf's OLD values right after the first
+          # call (verified: it happened when this used uppercase names).
+          prgnam="$INPUT_PRGNAM" category="$INPUT_CATEGORY" version="$INPUT_VERSION"
+
+          upstream_dir="$(mktemp -d)"
+          git clone --quiet --depth 1 --branch master \
+              https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
+
+          rm -rf "sbo/${category}/${prgnam}"
+          mkdir -p "sbo/${category}/${prgnam}"
+          generate_package "$prgnam" "$version" "$upstream_dir" "sbo/${category}/${prgnam}"
+
+          render_pr_body "$prgnam" "$version" > /tmp/pr-body.md
+
+      # Not hardcoded "master" - fetched live so this still works if the
+      # default branch is ever renamed (or, more immediately: while this
+      # pipeline's own PR is still open and unmerged, its infrastructure
+      # only exists on that branch, not on whatever's normally the
+      # default - so this has to track whatever the default branch
+      # actually is, not assume a literal name.
+      - name: Determine default branch
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          default_branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef -q .defaultBranchRef.name)"
+          echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
+
+      # Uses SBO_UPDATE_PR_TOKEN (fine-grained PAT, scoped to just this
+      # repo), not the default GITHUB_TOKEN or SBO_SUBMIT_TOKEN (that
+      # one's for a different repo entirely - see the README) - GitHub
+      # now requires manual workflow-run approval for PRs opened by
+      # github-actions[bot] (a policy change, applies even to same-repo
+      # branches, not just forks). A PAT makes the PR's own "opened by"
+      # a real account instead, which skips that gate. committer/author
+      # stay the bot identity regardless - that's just commit metadata,
+      # independent of which token performed the push/API calls.
+      #
+      # assignees is set for tracking/filtering purposes only - verified
+      # it does NOT trigger a notification (checked the actual
+      # notifications inbox: nothing gets generated at all for a
+      # self-assignment via your own token, same "don't notify you about
+      # your own actions" rule that applies to authorship). The "Notify"
+      # step below is the real notification mechanism.
+      - name: Open update PR
+        id: pr
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          token: ${{ secrets.SBO_UPDATE_PR_TOKEN }}
+          title: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
+          commit-message: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
+          body-path: /tmp/pr-body.md
+          branch: update/${{ inputs.prgnam }}-${{ inputs.version }}
+          base: ${{ steps.repo.outputs.default_branch }}
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          assignees: perrin4869
+          add-paths: |
+            sbo/${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
+            sbo/${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
+
+      # The actual notification mechanism: a comment posted by the
+      # DEFAULT token (github-actions[bot]) - a genuinely different actor
+      # from the PR's own author (your PAT). Confirmed working via a real
+      # email notification on PR #7 - contingent on "Include your own
+      # updates" being enabled in your notification settings; without it
+      # this generates no notification at all (verified separately).
+      # Skipped on a true no-op (nothing changed, so create-pull-request
+      # didn't create or update anything - pull-request-operation comes
+      # back empty).
+      - name: Notify
+        if: steps.pr.outputs.pull-request-operation != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr comment "${{ steps.pr.outputs.pull-request-number }}" \
+            --repo "${{ github.repository }}" \
+            --body "@perrin4869 ${{ steps.pr.outputs.pull-request-operation }} by the update pipeline."

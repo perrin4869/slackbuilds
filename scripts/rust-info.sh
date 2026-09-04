@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Automatic $PRGNAM.info generator for Rust software. Use this script for
-# software that supports x86-64 only.
+# Automatic $PRGNAM.info generator for Rust software. Set X86_64_ONLY=1
+# for software that supports x86-64 only; the default (0) supports both
+# x86-64 and x86.
 
 # Copyright 2022 K. Eugene Carlson  Tsukuba, Japan
 # All rights reserved.
@@ -34,12 +35,8 @@ HOMEPAGE=${HOMEPAGE:-}
 REQUIRES=${REQUIRES:-}
 MAINTAINER=${MAINTAINER:-}
 EMAIL=${EMAIL:-}
+X86_64_ONLY=${X86_64_ONLY:-0}
 
-# Change the following, if necessary
-ARCHIVE=${ARCHIVE:-$PRGNAM-$VERSION.tar.gz}
-# Command to extract the tarball
-TARCMD=${TARCMD:-"tar xf $ARCHIVE"}
-PRGDIR=${PRGDIR:-$PRGNAM-$VERSION}
 # Package tarball download
 URL=${URL:-}
 
@@ -47,17 +44,37 @@ URL=${URL:-}
 WEBADDR="https://static.crates.io/crates/"
 # WEBADDR="https://crates-io.s3-us-west-1.amazonaws.com/crates/"
 
+# X86_64_ONLY=1 writes crate info under DOWNLOAD_x86_64/MD5SUM_x86_64
+# instead of DOWNLOAD/MD5SUM - chosen once here and used consistently below,
+# including for the indirect ${!download_field} expansion that fetches the
+# crates themselves.
+if [ "$X86_64_ONLY" = 1 ]; then
+  download_field=DOWNLOAD_x86_64
+  md5_field=MD5SUM_x86_64
+else
+  download_field=DOWNLOAD
+  md5_field=MD5SUM
+fi
+
 rm -rf DEBUG CRATES
 
 wget $URL || exit
-$TARCMD || exit
+# archive/prgdir aren't caller config - both are derivable from what's
+# actually there: archive is just whatever wget saved the URL under (its
+# basename, since no -O was given above), and prgdir is the tarball's own
+# top-level directory, read from its own manifest rather than guessed
+# from $PRGNAM-$VERSION (wrong whenever the upstream repo's name doesn't
+# match PRGNAM, e.g. jujutsu's repo is "jj").
+archive="$(basename "$URL")"
+tar xf "$archive" || exit
+prgdir="$(tar tf "$archive" | head -1 | cut -d/ -f1)"
 
 # Get name and version for Crate dependencies
-grep -e ^name -e ^version $PRGDIR/Cargo.lock | grep \" | cut -d \" -f2- | tr -d \" > deps
+grep -e ^name -e ^version "$prgdir/Cargo.lock" | grep \" | cut -d \" -f2- | tr -d \" > deps
 # Get checksum as well
-grep ^checksum $PRGDIR/Cargo.lock | grep \" | cut -d \" -f2- | tr -d \" > checksums
+grep ^checksum "$prgdir/Cargo.lock" | grep \" | cut -d \" -f2- | tr -d \" > checksums
 
-echo DOWNLOAD_x86_64='"'$URL \\ > DOWNLOADS
+echo "$download_field"='"'$URL \\ > DOWNLOADS
 
 # Generating depsgood; name of crate with suffix and version info
 while read -r line; do
@@ -78,7 +95,7 @@ while read -r line; do
 done < deps
 
 # Don't actually use crates without checksums (not for download)
-grep -v -e ^$ -e ^# $PRGDIR/Cargo.lock > ignore1
+grep -v -e ^$ -e ^# "$prgdir/Cargo.lock" > ignore1
 cat ignore1 | tr -d \\n > ignore2
 sed -i 's|package]]|package]]\n|g' ignore2
 grep -v "checksum =" ignore2 > ignore3
@@ -106,7 +123,7 @@ rm -f ignore*
 source ./DOWNLOADS
 mkdir -p CRATES
 cd CRATES
-wget $DOWNLOAD || exit
+wget ${!download_field} || exit
 cd ..
 
 # Using depsgood, check sha256sum
@@ -118,7 +135,7 @@ while read -r crate; do
   [ $sha256 != $cksum ] && echo $crate has a bad sha256sum! && exit
 done < depsgood
 
-echo MD5SUM_x86_64='"'$(md5sum $ARCHIVE | cut -d' ' -f-1) \\ > MD5SUMS
+echo "$md5_field"='"'$(md5sum "$archive" | cut -d' ' -f-1) \\ > MD5SUMS
 
 # Getting md5sums based on depsgood list (ensures the sums don't get mixed up)
 while read -r crate; do
@@ -127,8 +144,11 @@ while read -r crate; do
 done < depsgood
 sed -i '$ s| \\|"|' MD5SUMS
 
-# Putting $PRGNAM.info together
-cat << EOF > $PRGNAM.info
+# Putting $PRGNAM.info together - field order/placement matches whichever
+# of DOWNLOAD/DOWNLOAD_x86_64 is the "real" one, exactly as the two
+# separate scripts this was merged from did.
+if [ "$X86_64_ONLY" = 1 ]; then
+  cat << EOF > $PRGNAM.info
 PRGNAM="$PRGNAM"
 VERSION="$VERSION"
 HOMEPAGE="$HOMEPAGE"
@@ -139,6 +159,19 @@ REQUIRES="$REQUIRES"
 MAINTAINER="$MAINTAINER"
 EMAIL="$EMAIL"
 EOF
+else
+  cat << EOF > $PRGNAM.info
+PRGNAM="$PRGNAM"
+VERSION="$VERSION"
+HOMEPAGE="$HOMEPAGE"
+$(cat DOWNLOADS MD5SUMS)
+DOWNLOAD_x86_64=""
+MD5SUM_x86_64=""
+REQUIRES="$REQUIRES"
+MAINTAINER="$MAINTAINER"
+EMAIL="$EMAIL"
+EOF
+fi
 
 # Cleaning up; see the DEBUG directory for intermediate documents.
 mkdir DEBUG
