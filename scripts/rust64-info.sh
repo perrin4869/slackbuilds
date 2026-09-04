@@ -35,11 +35,6 @@ REQUIRES=${REQUIRES:-}
 MAINTAINER=${MAINTAINER:-}
 EMAIL=${EMAIL:-}
 
-# Change the following, if necessary
-ARCHIVE=${ARCHIVE:-$PRGNAM-$VERSION.tar.gz}
-# Command to extract the tarball
-TARCMD=${TARCMD:-"tar xf $ARCHIVE"}
-PRGDIR=${PRGDIR:-$PRGNAM-$VERSION}
 # Package tarball download
 URL=${URL:-}
 
@@ -50,7 +45,17 @@ WEBADDR="https://static.crates.io/crates/"
 rm -rf DEBUG CRATES
 
 wget $URL || exit
+# ARCHIVE/PRGDIR used to be caller-supplied - both are derivable instead:
+# ARCHIVE is just whatever wget saved the URL under (its basename, since
+# no -O was given above), and PRGDIR is the tarball's own top-level
+# directory, read from its own manifest rather than guessed from
+# $PRGNAM-$VERSION (wrong whenever the upstream repo's name doesn't match
+# PRGNAM, e.g. jujutsu's repo is "jj").
+ARCHIVE=${ARCHIVE:-$(basename "$URL")}
+# Command to extract the tarball
+TARCMD=${TARCMD:-"tar xf $ARCHIVE"}
 $TARCMD || exit
+PRGDIR=${PRGDIR:-$(tar tf "$ARCHIVE" | head -1 | cut -d/ -f1)}
 
 # Get name and version for Crate dependencies
 grep -e ^name -e ^version $PRGDIR/Cargo.lock | grep \" | cut -d \" -f2- | tr -d \" > deps

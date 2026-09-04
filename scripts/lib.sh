@@ -454,16 +454,19 @@ EOF
             ;;
 
         rust|rust64)
-            local homepage requires maintainer email rust_script archive prgdir
+            local homepage requires maintainer email rust_script archive="" prgdir=""
             homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
             requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
             maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
             email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
 
-            [ -n "${ARCHIVE:-}" ] || die "$PRGNAM: STRATEGY=$STRATEGY needs ARCHIVE set"
-            [ -n "${PRGDIR:-}" ] || die "$PRGNAM: STRATEGY=$STRATEGY needs PRGDIR set"
-            archive="$(subst_version "$ARCHIVE" "$version")"
-            prgdir="$(subst_version "$PRGDIR" "$version")"
+            # ARCHIVE/PRGDIR are optional overrides - rust-info.sh derives
+            # both on its own (from $URL's basename, and the tarball's own
+            # top-level directory) unless set here. Only needed when a
+            # project's own naming doesn't fit that - see wofi.conf's
+            # notes when it's added under STRATEGY=rust, if ever.
+            [ -n "${ARCHIVE:-}" ] && archive="$(subst_version "$ARCHIVE" "$version")"
+            [ -n "${PRGDIR:-}" ] && prgdir="$(subst_version "$PRGDIR" "$version")"
 
             rust_script="scripts/rust-info.sh"
             [ "$STRATEGY" = rust64 ] && rust_script="scripts/rust64-info.sh"
