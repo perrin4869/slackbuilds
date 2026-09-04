@@ -1,4 +1,4 @@
-FROM ghcr.io/perrin4869/slackbuilds:15.0
+FROM slackbuilds:15.0
 
 # google-go-lang has REQUIRES="" (no further deps) - plain single-package
 # install, no queue/dependency handling needed. Baking this in means

@@ -42,20 +42,31 @@ jobs:
         id: date
         run: echo "tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
+      # driver: docker (the daemon's built-in builder, not a separate
+      # docker-container builder) shares this runner's local image store,
+      # so the two derived builds below can FROM the base build's tag
+      # directly - no push-to-GHCR-then-pull-back round trip for a 14.6GB
+      # image. We don't need docker-container's other features here
+      # (multi-platform, GHA cache export).
       - uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker
 
-      - name: Build + push slackbuilds:15.0
+      - name: Build slackbuilds:15.0
         uses: docker/build-push-action@v7
         with:
           context: .
+          load: true
           push: true
           tags: |
+            slackbuilds:15.0
             ghcr.io/perrin4869/slackbuilds:15.0
             ghcr.io/perrin4869/slackbuilds:15.0-${{ steps.date.outputs.tag }}
 
-      # Each FROMs ghcr.io/perrin4869/slackbuilds:15.0 directly (see
-      # Dockerfile.*) - built after the base is pushed above, so that tag
-      # already exists to pull from.
+      # FROMs the bare local tag slackbuilds:15.0 (see Dockerfile.*),
+      # resolved straight out of this runner's image store thanks to
+      # driver: docker above - not the ghcr.io tag pushed by the step
+      # before this one.
       - name: Build + push slackbuilds-google-go-lang:15.0
         uses: docker/build-push-action@v7
         with:

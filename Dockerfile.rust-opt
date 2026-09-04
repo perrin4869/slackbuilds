@@ -1,4 +1,4 @@
-FROM ghcr.io/perrin4869/slackbuilds:15.0
+FROM slackbuilds:15.0
 
 # rust-opt has REQUIRES="" (it's just a prebuilt-binary repack) - plain
 # single-package install, no queue/dependency handling needed. Baked in
