@@ -418,10 +418,13 @@ generate_package() {
     fi
 
     # --- .info -------------------------------------------------------------
-    local url archive prgdir
+    # SRC_URL is the only one of these needed by every STRATEGY - it's what
+    # ends up in the generated .info's own DOWNLOAD field. ARCHIVE/PRGDIR
+    # are rust/rust64-only (rust-info.sh needs them to lay out the vendored
+    # crate tree); the tarball path below just downloads to a throwaway
+    # temp filename to compute an MD5, so it never needs them at all.
+    local url
     url="$(subst_version "$SRC_URL" "$version")"
-    archive="$(subst_version "$ARCHIVE" "$version")"
-    prgdir="$(subst_version "$PRGDIR" "$version")"
 
     case "$STRATEGY" in
         tarball)
@@ -431,7 +434,7 @@ generate_package() {
             maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
             email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
 
-            archive_path="$workdir/$archive"
+            archive_path="$workdir/source-archive"
             log "downloading $url"
             wget -q -O "$archive_path" "$url" || die "$PRGNAM: failed to download $url"
             md5="$(md5_of "$archive_path")"
@@ -451,11 +454,16 @@ EOF
             ;;
 
         rust|rust64)
-            local homepage requires maintainer email rust_script
+            local homepage requires maintainer email rust_script archive prgdir
             homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
             requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
             maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
             email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
+
+            [ -n "${ARCHIVE:-}" ] || die "$PRGNAM: STRATEGY=$STRATEGY needs ARCHIVE set"
+            [ -n "${PRGDIR:-}" ] || die "$PRGNAM: STRATEGY=$STRATEGY needs PRGDIR set"
+            archive="$(subst_version "$ARCHIVE" "$version")"
+            prgdir="$(subst_version "$PRGDIR" "$version")"
 
             rust_script="scripts/rust-info.sh"
             [ "$STRATEGY" = rust64 ] && rust_script="scripts/rust64-info.sh"
