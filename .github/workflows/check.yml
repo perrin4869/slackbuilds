@@ -50,8 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./.github/actions/docker-storage-setup
-
+      # Unlike image.yml (which builds new 14GB+ layers and genuinely
+      # needs /mnt's headroom), this job only pulls one already-built
+      # image and runs one package's build inside it - testing whether
+      # the default runner's free space is enough without the extra
+      # ~3min docker-storage-setup costs on every matrix job.
       - name: Derive category/prgnam from path
         id: meta
         env:
