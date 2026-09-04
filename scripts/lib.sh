@@ -454,29 +454,22 @@ EOF
             ;;
 
         rust|rust64)
-            local homepage requires maintainer email rust_script archive="" prgdir=""
+            local homepage requires maintainer email
             homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
             requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
             maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
             email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
 
-            # ARCHIVE/PRGDIR are optional overrides - rust-info.sh derives
-            # both on its own (from $URL's basename, and the tarball's own
-            # top-level directory) unless set here. Only needed when a
-            # project's own naming doesn't fit that - see wofi.conf's
-            # notes when it's added under STRATEGY=rust, if ever.
-            [ -n "${ARCHIVE:-}" ] && archive="$(subst_version "$ARCHIVE" "$version")"
-            [ -n "${PRGDIR:-}" ] && prgdir="$(subst_version "$PRGDIR" "$version")"
-
-            rust_script="scripts/rust-info.sh"
-            [ "$STRATEGY" = rust64 ] && rust_script="scripts/rust64-info.sh"
-
+            # rust-info.sh derives the tarball's local filename and its
+            # extracted directory on its own (from $URL and the tarball's
+            # own manifest) - nothing here needs to know either. STRATEGY
+            # itself picks DOWNLOAD vs DOWNLOAD_x86_64 inside the script.
             (
                 cd "$workdir"
                 PRGNAM="$PRGNAM" VERSION="$version" HOMEPAGE="$homepage" REQUIRES="$requires" \
                     MAINTAINER="$maintainer" EMAIL="$email" \
-                    URL="$url" ARCHIVE="$archive" PRGDIR="$prgdir" \
-                    bash "$REPO_ROOT/$rust_script"
+                    URL="$url" STRATEGY="$STRATEGY" \
+                    bash "$REPO_ROOT/scripts/rust-info.sh"
             )
             [ -f "$workdir/${PRGNAM}.info" ] || die "$PRGNAM: rust-info generator did not produce ${PRGNAM}.info"
             cp "$workdir/${PRGNAM}.info" "$out_dir/${PRGNAM}.info"
