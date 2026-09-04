@@ -1,0 +1,28 @@
+name: Set up Docker storage
+description: >-
+  Frees disk space and points Docker's data-root at /mnt, which has far
+  more headroom than the runner's root filesystem. Shared by image.yml
+  (builds the image) and check.yml (pulls and runs it) - both need the
+  same headroom for the same reason.
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: true
+
+    # /mnt alone has ample headroom for this image (measured ~66 GB free
+    # vs. ~14.6 GB image size) - no need for a maintained action's more
+    # involved LVM volume-combining (and unlike free-disk-space above,
+    # that kind of action mounts a fresh filesystem straight over the
+    # target path with no stop/sync handling, which isn't safe to point
+    # at a live /var/lib/docker while dockerd is still running against
+    # the old one).
+    - name: Point Docker at /mnt
+      shell: bash
+      run: |
+        sudo systemctl stop docker
+        sudo mkdir -p /mnt/docker
+        echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+        sudo systemctl start docker
