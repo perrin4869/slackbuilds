@@ -60,10 +60,24 @@ jobs:
           # as inert text. See the security note in the repo README.
           MATRIX_PACKAGE: ${{ matrix.package }}
         run: |
+          set -euo pipefail
+          source scripts/lib.sh
           category="$(dirname "$MATRIX_PACKAGE" | xargs basename)"
           prgnam="$(basename "$MATRIX_PACKAGE")"
           echo "category=$category" >> "$GITHUB_OUTPUT"
           echo "prgnam=$prgnam" >> "$GITHUB_OUTPUT"
+
+          # IMAGE_VARIANT names a derived image with an expensive toolchain
+          # dependency (rust-opt, google-go-lang) pre-baked in - see
+          # image.yml and the field's own comment in lib.sh. Empty means
+          # the base image already has everything this package needs.
+          load_package_conf "packages/${prgnam}.conf"
+          if [ -n "${IMAGE_VARIANT:-}" ]; then
+            image="ghcr.io/perrin4869/slackbuilds-${IMAGE_VARIANT}:15.0"
+          else
+            image="ghcr.io/perrin4869/slackbuilds:15.0"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
       # Fresh current master, not a pinned historical SHA - submit.yml
       # re-derives against fresh upstream at merge time regardless (upstream
@@ -86,12 +100,13 @@ jobs:
           cp "${MATRIX_PACKAGE}/${PRGNAM}.SlackBuild" "$pkg_dir/"
 
       - name: Pull build image
-        run: docker pull ghcr.io/perrin4869/slackbuilds:15.0
+        run: docker pull "${{ steps.meta.outputs.image }}"
 
       - name: sbolint + build + sbopkglint
         env:
           CATEGORY: ${{ steps.meta.outputs.category }}
           PRGNAM: ${{ steps.meta.outputs.prgnam }}
+          IMAGE: ${{ steps.meta.outputs.image }}
         run: |
           set -euo pipefail
           mkdir -p out
@@ -107,7 +122,7 @@ jobs:
             -v sbo-cache:/var/cache/sbopkg \
             -v "$PWD/out:/output" \
             -e CATEGORY -e PRGNAM \
-            ghcr.io/perrin4869/slackbuilds:15.0 \
+            "$IMAGE" \
             bash -lc '
               set -euo pipefail
               # -e REPO_NAME=local -e REPO_BRANCH=local (as env vars) does
@@ -134,7 +149,11 @@ jobs:
               else
                 BUILD_TARGET="${PRGNAM}"
               fi
-              sbopkg -B -e stop -i "$BUILD_TARGET"
+              # -k: skip anything already installed - matters for the
+              # IMAGE_VARIANT images, where the expensive dependency
+              # (rust-opt, google-go-lang) is already there and does not
+              # need rebuilding.
+              sbopkg -B -e stop -k -i "$BUILD_TARGET"
               pkg="$(ls "/tmp/${PRGNAM}"-*.tgz | head -1)"
               sbopkglint "$pkg"
               cp "$pkg" /output/

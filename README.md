@@ -80,6 +80,10 @@ have no API for anything to watch.
 `STRATEGY` defaults to `tarball` and only needs to be set explicitly for
 `rust`/`rust64` (crate list regenerated via `rust-info.sh`/`rust64-info.sh`).
 
+`IMAGE_VARIANT` is only needed if the package depends on a toolchain
+expensive enough to warrant a prebuilt image variant - see "Image" below.
+`jujutsu`/`difftastic` set `rust-opt`, `yq` sets `google-go-lang`.
+
 Freezing a package (e.g. blocked on a Slackware/glibc version) adds:
 
 ```sh
@@ -143,7 +147,20 @@ slot has no GPG checking and is meant for exactly this.
 ## Image
 
 `ghcr.io/perrin4869/slackbuilds:15.0`, built by `image.yml` on every
-`Dockerfile` change and monthly (to pick up Slackware package updates).
+`Dockerfile`/`Dockerfile.*` change and monthly (to pick up Slackware
+package updates).
+
+`image.yml` also builds two derived images - `slackbuilds-google-go-lang`
+and `slackbuilds-rust-opt`, each `FROM` the base image with one expensive,
+`REQUIRES=""` toolchain package pre-installed. A package sets
+`IMAGE_VARIANT=google-go-lang`/`rust-opt` in its own `packages/*.conf` to
+have `check.yml` build against that variant instead of the base image,
+with `-k` (skip already-installed) so the toolchain itself isn't
+rebuilt. Beyond saving that rebuild time, this matters specifically for
+`google-go-lang`: its `/etc/profile.d/go.sh` (setting `GOROOT`/`PATH`)
+only gets read at shell startup, so a package built from it within the
+same already-running shell right after installing it would never see
+that setup at all.
 
 `image-deps.yml` (weekly cron + `workflow_dispatch`) tracks the image's two
 build-time dependencies:

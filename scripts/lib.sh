@@ -29,7 +29,8 @@ die() { log "error: $*"; exit 1; }
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        STRATEGY= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON=
+        STRATEGY= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON= \
+        IMAGE_VARIANT=
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"
@@ -38,6 +39,10 @@ load_package_conf() {
     # Most packages are a single source tarball with no special vendoring -
     # STRATEGY is only worth naming explicitly for the rust/rust64 case.
     STRATEGY="${STRATEGY:-tarball}"
+    # IMAGE_VARIANT names a derived image (ghcr.io/perrin4869/slackbuilds-
+    # <variant>:15.0) with an expensive toolchain dependency pre-baked in,
+    # for check.yml to build against instead of the base image - empty
+    # means the base image is enough. See check.yml for how this is used.
 }
 
 # Strip a known host prefix off a github.com/codeberg.org SOURCE URL,

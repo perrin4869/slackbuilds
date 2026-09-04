@@ -6,6 +6,7 @@ on:
     branches: [master]
     paths:
       - 'Dockerfile'
+      - 'Dockerfile.*'
   schedule:
     # Picks up Slackware package/security updates even when the Dockerfile
     # itself hasn't changed.
@@ -22,9 +23,9 @@ permissions:
 
 jobs:
   build:
-    name: Build + push ghcr.io/perrin4869/slackbuilds:15.0
+    name: Build + push slackbuilds:15.0 and its two toolchain variants
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -43,7 +44,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      - name: Build + push
+      - name: Build + push slackbuilds:15.0
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -51,3 +52,26 @@ jobs:
           tags: |
             ghcr.io/perrin4869/slackbuilds:15.0
             ghcr.io/perrin4869/slackbuilds:15.0-${{ steps.date.outputs.tag }}
+
+      # Each FROMs ghcr.io/perrin4869/slackbuilds:15.0 directly (see
+      # Dockerfile.*) - built after the base is pushed above, so that tag
+      # already exists to pull from.
+      - name: Build + push slackbuilds-google-go-lang:15.0
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.google-go-lang
+          push: true
+          tags: |
+            ghcr.io/perrin4869/slackbuilds-google-go-lang:15.0
+            ghcr.io/perrin4869/slackbuilds-google-go-lang:15.0-${{ steps.date.outputs.tag }}
+
+      - name: Build + push slackbuilds-rust-opt:15.0
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.rust-opt
+          push: true
+          tags: |
+            ghcr.io/perrin4869/slackbuilds-rust-opt:15.0
+            ghcr.io/perrin4869/slackbuilds-rust-opt:15.0-${{ steps.date.outputs.tag }}
