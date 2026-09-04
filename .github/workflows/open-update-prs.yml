@@ -25,11 +25,16 @@ on:
       SBO_UPDATE_PR_TOKEN:
         required: true
 
-# Nothing here still needs the default GITHUB_TOKEN's write access - the
-# actual push/PR-create runs as SBO_UPDATE_PR_TOKEN below, precisely so
-# the PR isn't opened by github-actions[bot] (see that step's comment).
+# contents stays read-only - the actual push/PR-create runs as
+# SBO_UPDATE_PR_TOKEN, precisely so the PR isn't opened by
+# github-actions[bot] (see that step's comment). pull-requests: write IS
+# needed for the default token, though - the Notify step posts its
+# comment as github-actions[bot] deliberately (a different actor than
+# the PR's own author), which needs this job's own token to have
+# comment-write access.
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   open-pr:
