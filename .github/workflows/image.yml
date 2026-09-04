@@ -59,9 +59,17 @@ jobs:
           load: true
           push: true
           tags: |
-            slackbuilds:15.0
             ghcr.io/perrin4869/slackbuilds:15.0
             ghcr.io/perrin4869/slackbuilds:15.0-${{ steps.date.outputs.tag }}
+
+      # A bare tag (no registry/namespace) would otherwise get pushed as
+      # docker.io/library/slackbuilds:15.0 by the step above - Docker's
+      # default normalization for an unqualified name - which fails
+      # (unauthorized, no Docker Hub login here). Tag it locally instead,
+      # after the real push, purely so Dockerfile.* below can FROM it
+      # without a registry pull.
+      - name: Tag slackbuilds:15.0 locally
+        run: docker tag ghcr.io/perrin4869/slackbuilds:15.0 slackbuilds:15.0
 
       # FROMs the bare local tag slackbuilds:15.0 (see Dockerfile.*),
       # resolved straight out of this runner's image store thanks to

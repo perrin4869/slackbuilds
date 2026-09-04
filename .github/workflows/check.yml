@@ -125,14 +125,6 @@ jobs:
             "$IMAGE" \
             bash -lc '
               set -euo pipefail
-              # -e REPO_NAME=local -e REPO_BRANCH=local (as env vars) does
-              # NOT work here, verified: sbopkg still reports "currently
-              # active repository (SBo/15.0)" and silently builds whatever
-              # version happens to be baked into the image, regardless of
-              # what env vars are set - traced well into sbopkg itself and
-              # could not find why the env-var path gets ignored for this
-              # operation specifically. Rewriting sbopkg.conf directly is
-              # what actually works.
               sed -i "s/^REPO_BRANCH=.*/REPO_BRANCH=local/;s/^REPO_NAME=.*/REPO_NAME=local/" /etc/sbopkg/sbopkg.conf
               cd /var/lib/sbopkg/local/local
               sbolint "${CATEGORY}/${PRGNAM}"
