@@ -126,7 +126,8 @@ touches `packages/*.conf`.
 
 | Secret | Used by | Purpose |
 |---|---|---|
-| `SBO_SUBMIT_TOKEN` | `submit.yml` | Classic PAT, `repo` scope. Pushes to `perrin4869/sbo` and opens PRs against `SlackBuildsOrg/slackbuilds` - the default `GITHUB_TOKEN` can do neither. |
+| `SBO_SUBMIT_TOKEN` | `submit.yml` | Classic PAT, `repo` scope. Pushes to `perrin4869/sbo` and opens PRs against `SlackBuildsOrg/slackbuilds` - the default `GITHUB_TOKEN` can do neither, and a fine-grained PAT can't be scoped to a repo you don't own. |
+| `SBO_UPDATE_PR_TOKEN` | `open-update-prs.yml` | Fine-grained PAT, scoped to just this repo, Contents + Pull requests (Read and write). Opens update PRs here - not `SBO_SUBMIT_TOKEN`, a different token for a different repo, and not the default `GITHUB_TOKEN`, since GitHub requires manual workflow-run approval for PRs opened by `github-actions[bot]`. |
 | `NEWRELEASES_API_KEY` | `sync-newreleases.yml` | newreleases.io account API key. |
 | `NEWRELEASES_WEBHOOK_ID` | `sync-newreleases.yml` | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and the payload template above. |
 

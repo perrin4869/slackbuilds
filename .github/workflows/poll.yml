@@ -143,4 +143,4 @@ jobs:
       category: ${{ matrix.category }}
       version: ${{ matrix.version }}
     secrets:
-      SBO_SUBMIT_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+      SBO_UPDATE_PR_TOKEN: ${{ secrets.SBO_UPDATE_PR_TOKEN }}
