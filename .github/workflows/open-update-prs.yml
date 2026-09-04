@@ -94,9 +94,15 @@ jobs:
       # a real account instead, which skips that gate. committer/author
       # stay the bot identity regardless - that's just commit metadata,
       # independent of which token performed the push/API calls.
-      # assignees guarantees a notification either way, since GitHub
-      # doesn't email you about your own actions.
+      #
+      # assignees is set for tracking/filtering purposes only - verified
+      # it does NOT trigger a notification (checked the actual
+      # notifications inbox: nothing gets generated at all for a
+      # self-assignment via your own token, same "don't notify you about
+      # your own actions" rule that applies to authorship). The "Notify"
+      # step below is the real notification mechanism.
       - name: Open update PR
+        id: pr
         uses: peter-evans/create-pull-request@v8.1.1
         with:
           token: ${{ secrets.SBO_UPDATE_PR_TOKEN }}
@@ -112,3 +118,20 @@ jobs:
             ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
             ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
             packages/${{ inputs.prgnam }}.conf
+
+      # The actual notification mechanism: a comment posted by the
+      # DEFAULT token (github-actions[bot]) - a genuinely different actor
+      # from the PR's own author (your PAT), so the self-notification
+      # suppression above doesn't apply, and @mentions are the single
+      # most reliable notification trigger GitHub has. Skipped on a true
+      # no-op (nothing changed, so create-pull-request didn't create or
+      # update anything - pull-request-operation comes back empty).
+      - name: Notify
+        if: steps.pr.outputs.pull-request-operation != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr comment "${{ steps.pr.outputs.pull-request-number }}" \
+            --repo "${{ github.repository }}" \
+            --body "@perrin4869 ${{ steps.pr.outputs.pull-request-operation }} by the update pipeline."
