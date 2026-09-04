@@ -142,3 +142,5 @@ jobs:
       prgnam: ${{ matrix.prgnam }}
       category: ${{ matrix.category }}
       version: ${{ matrix.version }}
+    secrets:
+      SBO_SUBMIT_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}

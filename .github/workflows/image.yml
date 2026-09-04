@@ -28,10 +28,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Free disk space / point Docker at /mnt
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+
+      # /mnt alone has ample headroom for this image (measured ~66 GB free
+      # vs. ~14.6 GB image size) - no need for a maintained action's more
+      # involved LVM volume-combining (and unlike free-disk-space above,
+      # that kind of action mounts a fresh filesystem straight over the
+      # target path with no stop/sync handling, which isn't safe to point
+      # at a live /var/lib/docker while dockerd is still running against
+      # the old one).
+      - name: Point Docker at /mnt
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL || true
           sudo systemctl stop docker
           sudo mkdir -p /mnt/docker
           echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json

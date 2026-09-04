@@ -21,10 +21,15 @@ on:
       version:
         required: true
         type: string
+    secrets:
+      SBO_SUBMIT_TOKEN:
+        required: true
 
+# Nothing here still needs the default GITHUB_TOKEN's write access - the
+# actual push/PR-create runs as SBO_SUBMIT_TOKEN below, precisely so the
+# PR isn't opened by github-actions[bot] (see that step's comment).
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   open-pr:
@@ -80,9 +85,19 @@ jobs:
           default_branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef -q .defaultBranchRef.name)"
           echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
 
+      # Uses SBO_SUBMIT_TOKEN, not the default GITHUB_TOKEN - GitHub now
+      # requires manual workflow-run approval for PRs opened by
+      # github-actions[bot] (a policy change, applies even to same-repo
+      # branches, not just forks). A PAT makes the PR's own "opened by"
+      # a real account instead, which skips that gate. committer/author
+      # stay the bot identity regardless - that's just commit metadata,
+      # independent of which token performed the push/API calls.
+      # assignees guarantees a notification either way, since GitHub
+      # doesn't email you about your own actions.
       - name: Open update PR
         uses: peter-evans/create-pull-request@v8.1.1
         with:
+          token: ${{ secrets.SBO_SUBMIT_TOKEN }}
           title: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
           commit-message: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
           body-path: /tmp/pr-body.md
@@ -90,6 +105,7 @@ jobs:
           base: ${{ steps.repo.outputs.default_branch }}
           committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          assignees: perrin4869
           add-paths: |
             ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
             ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
