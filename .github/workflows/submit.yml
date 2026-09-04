@@ -5,7 +5,7 @@ on:
   push:
     branches: [master]
     paths:
-      - '**/*.info'
+      - 'sbo/**/*.info'
 
 concurrency:
   group: submit
@@ -34,7 +34,7 @@ jobs:
           # by this repo in the first place, so there's nothing to submit;
           # without this filter it'd look identical to a real update and
           # get submitted to SlackBuildsOrg/slackbuilds regardless.
-          changed="$(git diff --name-only --diff-filter=M HEAD~1 HEAD -- '*/*/*.info' \
+          changed="$(git diff --name-only --diff-filter=M HEAD~1 HEAD -- 'sbo/*/*/*.info' \
             | xargs -r -n1 dirname | sort -u)"
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
           echo "packages=$json" >> "$GITHUB_OUTPUT"

@@ -5,7 +5,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - '**/*.info'
+      - 'sbo/**/*.info'
 
 concurrency:
   group: check-${{ github.event.pull_request.number }}
@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           changed="$(git diff --name-only \
               "origin/$BASE_REF" HEAD \
-              -- '*/*/*.info' \
+              -- 'sbo/*/*/*.info' \
             | xargs -r -n1 dirname | sort -u)"
 
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"

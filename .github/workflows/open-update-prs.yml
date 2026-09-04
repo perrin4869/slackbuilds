@@ -67,9 +67,9 @@ jobs:
           git clone --quiet --depth 1 --branch master \
               https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
 
-          rm -rf "${category}/${prgnam}"
-          mkdir -p "${category}/${prgnam}"
-          generate_package "$prgnam" "$version" "$upstream_dir" "${category}/${prgnam}"
+          rm -rf "sbo/${category}/${prgnam}"
+          mkdir -p "sbo/${category}/${prgnam}"
+          generate_package "$prgnam" "$version" "$upstream_dir" "sbo/${category}/${prgnam}"
 
           render_pr_body "$prgnam" "$version" > /tmp/pr-body.md
 
@@ -120,8 +120,8 @@ jobs:
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           assignees: perrin4869
           add-paths: |
-            ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
-            ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
+            sbo/${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
+            sbo/${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
             packages/${{ inputs.prgnam }}.conf
 
       # The actual notification mechanism: a comment posted by the

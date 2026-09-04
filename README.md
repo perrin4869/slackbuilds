@@ -7,7 +7,7 @@ them, and once a human merges the resulting PR here, opens the real PR
 upstream via `perrin4869/sbo`.
 
 ```
-upstream release ──▶ webhook.yml opens a PR here (<category>/<pkg>/)
+upstream release ──▶ webhook.yml opens a PR here (sbo/<category>/<pkg>/)
                           │
                           ▼
                     check.yml: sbolint + sbopkg -B -i + sbopkglint,
@@ -24,10 +24,12 @@ what was reviewed here, since upstream may have moved in the meantime.
 
 ## Reviewing an update PR
 
-Each tracked package lives in this repo at `<category>/<prgnam>/` - the same
-path it occupies in `SlackBuildsOrg/slackbuilds`. So an update PR's **Files
+Each tracked package lives in this repo at `sbo/<category>/<prgnam>/` -
+everything under `sbo/` mirrors the path it occupies in
+`SlackBuildsOrg/slackbuilds` (just nested one level deeper, under `sbo/`,
+to keep the repo root itself uncluttered). So an update PR's **Files
 changed** tab already is the real diff - what you see for
-`libraries/tree-sitter/tree-sitter.info` is what lands upstream if you
+`sbo/libraries/tree-sitter/tree-sitter.info` is what lands upstream if you
 merge, unless upstream moved since the PR was opened: `submit.yml`
 re-derives the package fresh at merge time, and flags it on the resulting
 upstream PR if that changes anything.
@@ -49,13 +51,13 @@ upstream PR if that changes anything.
   package, then hands it to
   [`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request)
   to open (or update) the PR.
-- `<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild`, kept
-  around after submission as the diff baseline for that package's *next*
-  update PR (so the Files-changed tab shows a real diff, not a wall of green
-  "new file" lines each time).
+- `sbo/<category>/<prgnam>/` - each tracked package's `.info`/`.SlackBuild`,
+  kept around after submission as the diff baseline for that package's
+  *next* update PR (so the Files-changed tab shows a real diff, not a wall
+  of green "new file" lines each time).
 
 `check.yml`/`submit.yml` discover which packages changed by diffing on
-`**/*.info`.
+`sbo/**/*.info`.
 
 ## Adding a package
 
