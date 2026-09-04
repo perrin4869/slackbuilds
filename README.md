@@ -63,8 +63,11 @@ upstream PR if that changes anything.
 
 Add `packages/<prgnam>.conf`. See any existing file for the shape; a plain
 GitHub-tagged, non-Rust package only needs `CATEGORY`, `PRGNAM`, `SOURCE`,
-`TAG_REGEX`, and `SRC_URL`/`ARCHIVE`/`PRGDIR` templates, plus a starting
-`VERSION`.
+`TAG_REGEX`, and `SRC_URL`/`ARCHIVE`/`PRGDIR` templates. Also seed
+`sbo/<category>/<prgnam>/<prgnam>.info`+`.SlackBuild` with the package's
+current upstream copy - that baseline is this repo's only record of "what
+version we last handled" (no separate `VERSION` field in the `.conf`;
+duplicating it there would just be one more place to fall out of sync).
 
 `SOURCE` is just the repo's URL (e.g.
 `https://github.com/tree-sitter/tree-sitter`). If `POLL` isn't set, the

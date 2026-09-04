@@ -4,8 +4,8 @@
 #
 # Conventions used throughout this pipeline:
 #  - "upstream" always means SlackBuildsOrg/slackbuilds@master, fetched fresh.
-#    Nothing in this repo (per-package dirs, packages/*.conf VERSION) is ever treated
-#    as a base to diff or build against - see the plan's "Hard constraint".
+#    Nothing in this repo (per-package dirs under sbo/) is ever treated as a
+#    base to diff or build against - see the plan's "Hard constraint".
 #  - Package configs live in packages/<prgnam>.conf and are sourced, not parsed.
 
 set -euo pipefail
@@ -29,7 +29,7 @@ die() { log "error: $*"; exit 1; }
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        STRATEGY= SRC_URL= ARCHIVE= PRGDIR= VERSION= FROZEN=0 FROZEN_REASON= \
+        STRATEGY= SRC_URL= ARCHIVE= PRGDIR= FROZEN=0 FROZEN_REASON= \
         IMAGE_VARIANT=
     # shellcheck disable=SC1090
     source "$conf"
@@ -243,10 +243,12 @@ TOML
 
 # --- detection orchestration --------------------------------------------
 
-# An update is only "needed" if it beats both what upstream currently ships
-# AND the last version this repo already opened a PR for (which may still
-# be sitting in review upstream) - the .conf VERSION exists purely to avoid
-# filing the same PR twice.
+# An update is only "needed" if it beats what upstream currently ships AND
+# there's no open PR for it already here (an update PR bumps this repo's
+# own tracked sbo/.info in the same commit, but that only lands on master
+# once the PR merges - until then, this branch-name check is what stops a
+# second PR for the same version from being opened while the first is
+# still in review).
 already_pending() {
     local prgnam="$1" version="$2"
     gh pr list --repo "$(git config --get remote.origin.url | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#')" \
@@ -298,8 +300,14 @@ resolve_latest() {
 check_result() {
     local latest="$1"
 
+    # Our own last-known version, straight from this repo's own tracked
+    # copy - not packages/*.conf (no VERSION field there; it duplicated
+    # this without ever being a separate source of truth).
+    local tracked
+    tracked="$(info_get "sbo/${CATEGORY}/${PRGNAM}/${PRGNAM}.info" VERSION 2>/dev/null || true)"
+
     if [ "${FROZEN:-0}" = "1" ]; then
-        if [ -n "$latest" ] && version_gt "$latest" "$VERSION"; then
+        if [ -n "$latest" ] && version_gt "$latest" "$tracked"; then
             echo "FROZEN $PRGNAM ${FROZEN_REASON:-frozen} (behind: $latest)"
         else
             echo "FROZEN $PRGNAM ${FROZEN_REASON:-frozen}"
@@ -316,10 +324,10 @@ check_result() {
     upstream="$(upstream_version "$CATEGORY" "$PRGNAM")"
     if [ -z "$upstream" ]; then
         log "warn: $PRGNAM: not found at ${CATEGORY}/${PRGNAM} upstream (moved/renamed?)"
-        upstream="$VERSION"
+        upstream="$tracked"
     fi
 
-    if ! version_gt "$latest" "$upstream" || ! version_gt "$latest" "$VERSION"; then
+    if ! version_gt "$latest" "$upstream" || ! version_gt "$latest" "$tracked"; then
         echo "UP_TO_DATE $PRGNAM $upstream"
         return
     fi
