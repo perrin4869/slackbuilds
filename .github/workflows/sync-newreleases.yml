@@ -6,7 +6,12 @@ on:
     branches: [master]
     paths:
       - 'packages/*.conf'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Log every newreleases.io request and response'
+        type: boolean
+        default: false
 
 concurrency:
   group: sync-newreleases
@@ -27,6 +32,7 @@ jobs:
         env:
           NEWRELEASES_API_KEY: ${{ secrets.NEWRELEASES_API_KEY }}
           NEWRELEASES_WEBHOOK_ID: ${{ secrets.NEWRELEASES_WEBHOOK_ID }}
+          DEBUG: ${{ github.event.inputs.debug }}
         run: |
           set -euo pipefail
           source scripts/lib.sh
@@ -36,15 +42,28 @@ jobs:
 
           API="https://api.newreleases.io/v1"
 
+          # DEBUG is only ever "true" on a manual workflow_dispatch with the
+          # box checked - empty (schedule/push triggers, or unchecked) means
+          # no request/response logging. Only the body is logged, never the
+          # X-Key header - not that it'd leak (GitHub masks the literal
+          # secret value in logs regardless), just no reason to print it.
           nr_api() {
-            local method="$1" path="$2" body="${3:-}"
-            if [ -n "$body" ]; then
-              curl -sS -X "$method" "${API}${path}" \
-                -H "X-Key: ${NEWRELEASES_API_KEY}" -H 'Content-Type: application/json' \
-                -d "$body"
-            else
-              curl -sS -X "$method" "${API}${path}" -H "X-Key: ${NEWRELEASES_API_KEY}"
+            local method="$1" path="$2" body="${3:-}" response
+            if [ "${DEBUG:-}" = "true" ]; then
+              log "--> $method ${API}${path}"
+              [ -n "$body" ] && log "$body"
             fi
+            if [ -n "$body" ]; then
+              response="$(curl -sS -X "$method" "${API}${path}" \
+                -H "X-Key: ${NEWRELEASES_API_KEY}" -H 'Content-Type: application/json' \
+                -d "$body")"
+            else
+              response="$(curl -sS -X "$method" "${API}${path}" -H "X-Key: ${NEWRELEASES_API_KEY}")"
+            fi
+            if [ "${DEBUG:-}" = "true" ]; then
+              log "<-- $response"
+            fi
+            printf '%s' "$response"
           }
 
           log "fetching currently tracked projects"
