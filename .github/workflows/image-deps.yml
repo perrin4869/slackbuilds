@@ -23,7 +23,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # sbopkg is pinned via the Dockerfile's SBOPKG_VERSION ARG, fetched
       # from a specific GitHub release - so a new release opens a PR
@@ -75,7 +75,7 @@ jobs:
       contents: read
       actions: write # to dispatch image.yml directly
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # sbo-maintainer-tools has no version pin - the Dockerfile just
       # installs whatever `sbopkg -B -i sbo-maintainer-tools` finds in the
