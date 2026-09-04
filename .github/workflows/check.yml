@@ -122,7 +122,19 @@ jobs:
               cd /var/lib/sbopkg/local/local
               sbolint "${CATEGORY}/${PRGNAM}"
               sqg -p "${PRGNAM}"
-              sbopkg -B -e stop -i "${PRGNAM}"
+              # sqg only writes a queue file when REQUIRES is non-empty (a
+              # package with no dependencies has nothing to queue). When it
+              # DOES write one, sbopkg -i <name> finds both a queuefile and
+              # a package of that name and asks (interactively) which one
+              # is meant - which hangs forever here (no tty attached).
+              # Referencing the queuefile by its .sqf extension, per
+              # the sbopkg man page, is the documented disambiguation.
+              if [ -f "/var/lib/sbopkg/queues/${PRGNAM}.sqf" ]; then
+                BUILD_TARGET="${PRGNAM}.sqf"
+              else
+                BUILD_TARGET="${PRGNAM}"
+              fi
+              sbopkg -B -e stop -i "$BUILD_TARGET"
               pkg="$(ls "/tmp/${PRGNAM}"-*.tgz | head -1)"
               sbopkglint "$pkg"
               cp "$pkg" /output/
