@@ -27,10 +27,14 @@ on:
 
 # contents stays read-only - the actual push/PR-create runs as
 # SBO_UPDATE_PR_TOKEN, precisely so the PR isn't opened by
-# github-actions[bot] (see that step's comment). The default token
-# doesn't touch pull requests at all here.
+# github-actions[bot] (see that step's comment). pull-requests: write IS
+# needed for the default token, though - the Notify step posts its
+# comment as github-actions[bot] deliberately (a different actor than
+# the PR's own author), which needs this job's own token to have
+# comment-write access.
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   open-pr:
@@ -100,11 +104,8 @@ jobs:
       # it does NOT trigger a notification (checked the actual
       # notifications inbox: nothing gets generated at all for a
       # self-assignment via your own token, same "don't notify you about
-      # your own actions" rule that applies to authorship). A different
-      # actor's @mention comment was tried as a workaround and also
-      # confirmed to generate no notification - removed rather than kept
-      # as dead weight. See the README/PR history for the real fix
-      # (opening PRs as a separate bot account instead of your own PAT).
+      # your own actions" rule that applies to authorship). The "Notify"
+      # step below is the real notification mechanism.
       - name: Open update PR
         id: pr
         uses: peter-evans/create-pull-request@v8.1.1
@@ -122,3 +123,22 @@ jobs:
             ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.info
             ${{ inputs.category }}/${{ inputs.prgnam }}/${{ inputs.prgnam }}.SlackBuild
             packages/${{ inputs.prgnam }}.conf
+
+      # The actual notification mechanism: a comment posted by the
+      # DEFAULT token (github-actions[bot]) - a genuinely different actor
+      # from the PR's own author (your PAT). Confirmed working via a real
+      # email notification on PR #7 - contingent on "Include your own
+      # updates" being enabled in your notification settings; without it
+      # this generates no notification at all (verified separately).
+      # Skipped on a true no-op (nothing changed, so create-pull-request
+      # didn't create or update anything - pull-request-operation comes
+      # back empty).
+      - name: Notify
+        if: steps.pr.outputs.pull-request-operation != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr comment "${{ steps.pr.outputs.pull-request-number }}" \
+            --repo "${{ github.repository }}" \
+            --body "@perrin4869 ${{ steps.pr.outputs.pull-request-operation }} by the update pipeline."
