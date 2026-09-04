@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Automatic $PRGNAM.info generator for Rust software. Set STRATEGY=rust64
-# for software that supports x86-64 only; anything else (the default)
-# supports both x86-64 and x86.
+# Automatic $PRGNAM.info generator for Rust software. Set X86_64_ONLY=1
+# for software that supports x86-64 only; the default (0) supports both
+# x86-64 and x86.
 
 # Copyright 2022 K. Eugene Carlson  Tsukuba, Japan
 # All rights reserved.
@@ -35,7 +35,7 @@ HOMEPAGE=${HOMEPAGE:-}
 REQUIRES=${REQUIRES:-}
 MAINTAINER=${MAINTAINER:-}
 EMAIL=${EMAIL:-}
-STRATEGY=${STRATEGY:-rust}
+X86_64_ONLY=${X86_64_ONLY:-0}
 
 # Package tarball download
 URL=${URL:-}
@@ -44,11 +44,11 @@ URL=${URL:-}
 WEBADDR="https://static.crates.io/crates/"
 # WEBADDR="https://crates-io.s3-us-west-1.amazonaws.com/crates/"
 
-# rust64 (x86-64 only) writes crate info under DOWNLOAD_x86_64/MD5SUM_x86_64
+# X86_64_ONLY=1 writes crate info under DOWNLOAD_x86_64/MD5SUM_x86_64
 # instead of DOWNLOAD/MD5SUM - chosen once here and used consistently below,
 # including for the indirect ${!download_field} expansion that fetches the
 # crates themselves.
-if [ "$STRATEGY" = rust64 ]; then
+if [ "$X86_64_ONLY" = 1 ]; then
   download_field=DOWNLOAD_x86_64
   md5_field=MD5SUM_x86_64
 else
@@ -145,9 +145,9 @@ done < depsgood
 sed -i '$ s| \\|"|' MD5SUMS
 
 # Putting $PRGNAM.info together - field order/placement matches whichever
-# of DOWNLOAD/DOWNLOAD_x86_64 is the "real" one for this STRATEGY exactly
-# as the two separate scripts this was merged from did.
-if [ "$STRATEGY" = rust64 ]; then
+# of DOWNLOAD/DOWNLOAD_x86_64 is the "real" one, exactly as the two
+# separate scripts this was merged from did.
+if [ "$X86_64_ONLY" = 1 ]; then
   cat << EOF > $PRGNAM.info
 PRGNAM="$PRGNAM"
 VERSION="$VERSION"

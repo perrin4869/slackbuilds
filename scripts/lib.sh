@@ -29,7 +29,7 @@ die() { log "error: $*"; exit 1; }
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        STRATEGY= SRC_URL= ARCHIVE= PRGDIR= FROZEN=0 FROZEN_REASON= \
+        STRATEGY= SRC_URL= X86_64_ONLY=0 FROZEN=0 FROZEN_REASON= \
         IMAGE_VARIANT=
     # shellcheck disable=SC1090
     source "$conf"
@@ -37,7 +37,9 @@ load_package_conf() {
     [ -n "$CATEGORY" ] || die "$conf: CATEGORY not set"
     [ -n "$SOURCE" ] || die "$conf: SOURCE not set"
     # Most packages are a single source tarball with no special vendoring -
-    # STRATEGY is only worth naming explicitly for the rust/rust64 case.
+    # STRATEGY is only worth naming explicitly for the rust case (a vendored
+    # crate build). Orthogonal to X86_64_ONLY (arch support), which either
+    # STRATEGY can set independently.
     STRATEGY="${STRATEGY:-tarball}"
     # IMAGE_VARIANT names a derived image (ghcr.io/perrin4869/slackbuilds-
     # <variant>:15.0) with an expensive toolchain dependency pre-baked in,
@@ -419,10 +421,16 @@ generate_package() {
 
     # --- .info -------------------------------------------------------------
     # SRC_URL is the only one of these needed by every STRATEGY - it's what
-    # ends up in the generated .info's own DOWNLOAD field. ARCHIVE/PRGDIR
-    # are rust/rust64-only (rust-info.sh needs them to lay out the vendored
-    # crate tree); the tarball path below just downloads to a throwaway
-    # temp filename to compute an MD5, so it never needs them at all.
+    # ends up in the generated .info's own DOWNLOAD (or DOWNLOAD_x86_64)
+    # field. ARCHIVE/PRGDIR are rust-only (rust-info.sh needs them to lay
+    # out the vendored crate tree, and derives both on its own); the
+    # tarball path below just downloads to a throwaway temp filename to
+    # compute an MD5, so it never needs them at all.
+    #
+    # X86_64_ONLY is independent of STRATEGY - it's an arch-support fact
+    # about the package, orthogonal to which generator builds its .info
+    # (a package can be x86_64-only with either a plain tarball or a
+    # vendored-crate build).
     local url
     url="$(subst_version "$SRC_URL" "$version")"
 
@@ -439,21 +447,31 @@ generate_package() {
             wget -q -O "$archive_path" "$url" || die "$PRGNAM: failed to download $url"
             md5="$(md5_of "$archive_path")"
 
+            local download_lines
+            if [ "${X86_64_ONLY:-0}" = 1 ]; then
+                download_lines="DOWNLOAD=\"UNSUPPORTED\"
+MD5SUM=\"UNSUPPORTED\"
+DOWNLOAD_x86_64=\"$url\"
+MD5SUM_x86_64=\"$md5\""
+            else
+                download_lines="DOWNLOAD=\"$url\"
+MD5SUM=\"$md5\"
+DOWNLOAD_x86_64=\"\"
+MD5SUM_x86_64=\"\""
+            fi
+
             cat > "$out_dir/${PRGNAM}.info" <<EOF
 PRGNAM="$PRGNAM"
 VERSION="$version"
 HOMEPAGE="$homepage"
-DOWNLOAD="$url"
-MD5SUM="$md5"
-DOWNLOAD_x86_64=""
-MD5SUM_x86_64=""
+$download_lines
 REQUIRES="$requires"
 MAINTAINER="$maintainer"
 EMAIL="$email"
 EOF
             ;;
 
-        rust|rust64)
+        rust)
             local homepage requires maintainer email
             homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
             requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
@@ -462,13 +480,12 @@ EOF
 
             # rust-info.sh derives the tarball's local filename and its
             # extracted directory on its own (from $URL and the tarball's
-            # own manifest) - nothing here needs to know either. STRATEGY
-            # itself picks DOWNLOAD vs DOWNLOAD_x86_64 inside the script.
+            # own manifest) - nothing here needs to know either.
             (
                 cd "$workdir"
                 PRGNAM="$PRGNAM" VERSION="$version" HOMEPAGE="$homepage" REQUIRES="$requires" \
                     MAINTAINER="$maintainer" EMAIL="$email" \
-                    URL="$url" STRATEGY="$STRATEGY" \
+                    URL="$url" X86_64_ONLY="${X86_64_ONLY:-0}" \
                     bash "$REPO_ROOT/scripts/rust-info.sh"
             )
             [ -f "$workdir/${PRGNAM}.info" ] || die "$PRGNAM: rust-info generator did not produce ${PRGNAM}.info"

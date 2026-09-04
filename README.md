@@ -38,13 +38,14 @@ upstream PR if that changes anything.
 
 - `packages/<prgnam>.conf` - one file per tracked package: category, upstream
   source, tag-matching regex, `STRATEGY` (`tarball`, the default, or
-  `rust`/`rust64`), and `FROZEN=1` for packages that can't be updated right
-  now (see below).
+  `rust`), `X86_64_ONLY=1` for an x86_64-only package (independent of
+  `STRATEGY` - either can set it), and `FROZEN=1` for packages that can't
+  be updated right now (see below).
 - `scripts/lib.sh` - shared helpers: version resolvers per `SOURCE` type,
   `.info` parsing, `generate_package()` (regenerates `.info`+`.SlackBuild`
   from a fresh upstream checkout), `render_pr_body()`.
 - `scripts/rust-info.sh` - the crate-list generator for Rust packages
-  (`STRATEGY=rust`/`rust64` selects `DOWNLOAD` vs `DOWNLOAD_x86_64`).
+  (`X86_64_ONLY` selects `DOWNLOAD` vs `DOWNLOAD_x86_64`).
 - `.github/workflows/open-update-prs.yml` - reusable workflow
   (`workflow_call`), called once per package that needs an update by both
   `webhook.yml` and `poll.yml` via `strategy: matrix`. Regenerates the
@@ -85,8 +86,9 @@ fields). `wofi`/`libtraceevent` are the current examples - hg.sr.ht and cgit
 have no API for anything to watch.
 
 `STRATEGY` defaults to `tarball` and only needs to be set explicitly for
-`rust` (both architectures) or `rust64` (x86-64 only) - either way, the
-crate list is regenerated via `rust-info.sh`.
+`rust` (crate list regenerated via `rust-info.sh`). `X86_64_ONLY=1` is a
+separate, orthogonal flag for an x86_64-only package - set it regardless
+of `STRATEGY` if the package doesn't support x86.
 
 `IMAGE_VARIANT` is only needed if the package depends on a toolchain
 expensive enough to warrant a prebuilt image variant - see "Image" below.
