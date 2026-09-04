@@ -27,7 +27,14 @@ jobs:
       - id: list
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only HEAD~1 HEAD -- '*/*/*.info' \
+          # --diff-filter=M: only an already-tracked package's .info being
+          # modified means "submit a version bump". A newly ADDED .info -
+          # baseline-seeding an existing package's diff history here, or a
+          # brand new package's very first PR - was never shipped upstream
+          # by this repo in the first place, so there's nothing to submit;
+          # without this filter it'd look identical to a real update and
+          # get submitted to SlackBuildsOrg/slackbuilds regardless.
+          changed="$(git diff --name-only --diff-filter=M HEAD~1 HEAD -- '*/*/*.info' \
             | xargs -r -n1 dirname | sort -u)"
           json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
           echo "packages=$json" >> "$GITHUB_OUTPUT"
