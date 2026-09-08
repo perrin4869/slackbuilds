@@ -29,8 +29,8 @@ die() { log "error: $*"; exit 1; }
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        STRATEGY= SRC_URL= X86_64_ONLY=0 FROZEN=0 FROZEN_REASON= \
-        IMAGE_VARIANT=
+        STRATEGY= DOWNLOAD_URL= X86_64_ONLY=0 FROZEN=0 FROZEN_REASON= \
+        CHECK_IMAGE=
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"
@@ -41,7 +41,7 @@ load_package_conf() {
     # crate build). Orthogonal to X86_64_ONLY (arch support), which either
     # STRATEGY can set independently.
     STRATEGY="${STRATEGY:-tarball}"
-    # IMAGE_VARIANT names a derived image (ghcr.io/perrin4869/slackbuilds-
+    # CHECK_IMAGE names a derived image (ghcr.io/perrin4869/slackbuilds-
     # <variant>:15.0) with an expensive toolchain dependency pre-baked in,
     # for check.yml to build against instead of the base image - empty
     # means the base image is enough. See check.yml for how this is used.
@@ -75,7 +75,7 @@ find_package_by_repo() {
     done
 }
 
-# %VERSION% substitution used in SRC_URL / ARCHIVE / PRGDIR templates.
+# %VERSION% substitution used in DOWNLOAD_URL / ARCHIVE / PRGDIR templates.
 subst_version() {
     local template="$1" version="$2"
     printf '%s' "${template//%VERSION%/$version}"
@@ -420,7 +420,7 @@ generate_package() {
     fi
 
     # --- .info -------------------------------------------------------------
-    # SRC_URL is the only one of these needed by every STRATEGY - it's what
+    # DOWNLOAD_URL is the only one of these needed by every STRATEGY - it's what
     # ends up in the generated .info's own DOWNLOAD (or DOWNLOAD_x86_64)
     # field. ARCHIVE/PRGDIR are rust-only (rust-info.sh needs them to lay
     # out the vendored crate tree, and derives both on its own); the
@@ -432,7 +432,7 @@ generate_package() {
     # (a package can be x86_64-only with either a plain tarball or a
     # vendored-crate build).
     local url
-    url="$(subst_version "$SRC_URL" "$version")"
+    url="$(subst_version "$DOWNLOAD_URL" "$version")"
 
     case "$STRATEGY" in
         tarball)

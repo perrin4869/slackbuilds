@@ -2,16 +2,8 @@
 name: Release webhook
 
 on:
-  # We don't scan for anything here - newreleases.io already resolved the
-  # version and is telling us via webhook. See "Determine target package"
-  # below for what we still verify ourselves even so.
   repository_dispatch:
     types: [upstream-release]
-  # No cron, and no fallback scan for a missing/unmatched payload either -
-  # this workflow only ever checks a version it's already been given.
-  # Scanning (the detect step, TAG_REGEX candidate lists, nvchecker) is
-  # poll.yml's job alone, on its own schedule - including an ad hoc check
-  # of a single package via poll.yml's own workflow_dispatch.
   workflow_dispatch:
     inputs:
       package:

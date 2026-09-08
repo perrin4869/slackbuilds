@@ -70,8 +70,8 @@ upstream PR if that changes anything.
 
 Add `packages/<prgnam>.conf`. See any existing file for the shape; a plain
 GitHub-tagged, non-Rust package only needs `CATEGORY`, `PRGNAM`, `SOURCE`,
-`TAG_REGEX`, and a `SRC_URL` template - no `ARCHIVE`/`PRGDIR` needed for
-any strategy; `rust-info.sh` derives both on its own (from `SRC_URL`'s
+`TAG_REGEX`, and a `DOWNLOAD_URL` template - no `ARCHIVE`/`PRGDIR` needed for
+any strategy; `rust-info.sh` derives both on its own (from `DOWNLOAD_URL`'s
 basename, and the downloaded tarball's own top-level directory). Also seed
 `sbo/<category>/<prgnam>/<prgnam>.info`+`.SlackBuild` with the package's
 current upstream copy - that baseline is this repo's only record of "what
@@ -96,7 +96,7 @@ have no API for anything to watch.
 separate, orthogonal flag for an x86_64-only package - set it regardless
 of `STRATEGY` if the package doesn't support x86.
 
-`IMAGE_VARIANT` is only needed if the package depends on a toolchain
+`CHECK_IMAGE` is only needed if the package depends on a toolchain
 expensive enough to warrant a prebuilt image variant - see "Image" below.
 `jujutsu`/`difftastic` set `rust-opt`, `yq` sets `google-go-lang`.
 
@@ -169,7 +169,7 @@ package updates).
 `image.yml` also builds two derived images - `slackbuilds-google-go-lang`
 and `slackbuilds-rust-opt`, each `FROM` the base image with one expensive,
 `REQUIRES=""` toolchain package pre-installed. A package sets
-`IMAGE_VARIANT=google-go-lang`/`rust-opt` in its own `packages/*.conf` to
+`CHECK_IMAGE=google-go-lang`/`rust-opt` in its own `packages/*.conf` to
 have `check.yml` build against that variant instead of the base image,
 with `-k` (skip already-installed) so the toolchain itself isn't
 rebuilt. Beyond saving that rebuild time, this matters specifically for
