@@ -13,9 +13,6 @@ on:
         description: >-
           Single package to check (PRGNAM), any package - not just POLL=1
           ones. Empty checks every POLL=1 package (the cron's own scope).
-          This is the only place left to scan a github/codeberg package
-          on demand - webhook.yml never scans, it only ever checks a
-          version it's already been given.
         required: false
 
 concurrency:

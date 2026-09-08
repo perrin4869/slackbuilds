@@ -144,9 +144,9 @@ while read -r crate; do
 done < depsgood
 sed -i '$ s| \\|"|' MD5SUMS
 
-# Putting $PRGNAM.info together - field order/placement matches whichever
-# of DOWNLOAD/DOWNLOAD_x86_64 is the "real" one, exactly as the two
-# separate scripts this was merged from did.
+# Two full heredocs rather than one with conditional field lines - field
+# order differs (the UNSUPPORTED pair leads here, trails in the other
+# case), so this stays a literal, readable template either way.
 if [ "$X86_64_ONLY" = 1 ]; then
   cat << EOF > $PRGNAM.info
 PRGNAM="$PRGNAM"

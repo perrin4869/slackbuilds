@@ -302,9 +302,7 @@ resolve_latest() {
 check_result() {
     local latest="$1"
 
-    # Our own last-known version, straight from this repo's own tracked
-    # copy - not packages/*.conf (no VERSION field there; it duplicated
-    # this without ever being a separate source of truth).
+    # Our own last-known version, from this repo's own tracked copy.
     local tracked
     tracked="$(info_get "sbo/${CATEGORY}/${PRGNAM}/${PRGNAM}.info" VERSION 2>/dev/null || true)"
 
