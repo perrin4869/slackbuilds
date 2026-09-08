@@ -1,0 +1,196 @@
+---
+name: Submit upstream
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'sbo/**/*.info'
+
+concurrency:
+  group: submit
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    name: Discover merged packages
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: list
+        run: |
+          set -euo pipefail
+          # --diff-filter=M: only an already-tracked package's .info being
+          # modified means "submit a version bump". A newly ADDED .info -
+          # baseline-seeding an existing package's diff history here, or a
+          # brand new package's very first PR - was never shipped upstream
+          # by this repo in the first place, so there's nothing to submit;
+          # without this filter it'd look identical to a real update and
+          # get submitted to SlackBuildsOrg/slackbuilds regardless.
+          changed="$(git diff --name-only --diff-filter=M HEAD~1 HEAD -- 'sbo/*/*/*.info' \
+            | xargs -r -n1 dirname | sort -u)"
+          json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
+          echo "packages=$json" >> "$GITHUB_OUTPUT"
+
+  submit:
+    name: ${{ matrix.package }}
+    needs: discover
+    if: needs.discover.outputs.packages != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Deliberately re-derives from a FRESH upstream clone at HEAD rather
+      # than trusting this repo's copy - upstream may have rewritten the
+      # package (a mass script pass, another contributor's PR) since this
+      # repo's PR was reviewed, and upstream is always the source of truth.
+      # If the fresh result differs from what was reviewed, we still submit
+      # it (silently discarding stale reviewed output would be worse), but
+      # flag the drift loudly so a human notices.
+      - name: Submit to SlackBuildsOrg/slackbuilds
+        id: submit
+        env:
+          SBO_SUBMIT_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+          # SBO_SUBMIT_TOKEN doubles as GH_TOKEN for the whole step (it has
+          # repo scope, so it can read SlackBuildsOrg/slackbuilds fine too) -
+          # upstream_version() below shells out to `gh api`, and without
+          # this it fails silently (fetch_upstream_file swallows the auth
+          # error) rather than crashing: current_upstream_version would
+          # just come back empty, silently disabling the "did someone else
+          # already ship this" guard instead of erroring out.
+          GH_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+          MATRIX_PACKAGE: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          prgnam="$(basename "$MATRIX_PACKAGE")"
+          pkg_dir="$MATRIX_PACKAGE"
+          version="$(info_get "$pkg_dir/${prgnam}.info" VERSION)"
+          [ -n "$version" ] || die "$prgnam: couldn't read VERSION out of $pkg_dir/${prgnam}.info"
+
+          conf="packages/${prgnam}.conf"
+          load_package_conf "$conf"
+          [ "$prgnam" = "$PRGNAM" ] || die "packages/${prgnam}.conf declares PRGNAM=$PRGNAM"
+
+          SBO_FORK="${SBO_FORK:-perrin4869/sbo}"
+          SBO_UPSTREAM="${SBO_UPSTREAM:-${UPSTREAM_OWNER}/${UPSTREAM_REPO}}"
+
+          [ -f "$pkg_dir/${PRGNAM}.info" ]       || die "missing $pkg_dir/${PRGNAM}.info"
+          [ -f "$pkg_dir/${PRGNAM}.SlackBuild" ] || die "missing $pkg_dir/${PRGNAM}.SlackBuild"
+
+          # --- re-check against upstream HEAD, in case someone else already shipped it -
+          current_upstream_version="$(upstream_version "$CATEGORY" "$PRGNAM")"
+          if [ -n "$current_upstream_version" ] && ! version_gt "$version" "$current_upstream_version"; then
+              log "$PRGNAM: upstream already ships $current_upstream_version (>= $version) - skipping submit, someone else got there first"
+              echo "result=SKIPPED $PRGNAM already-shipped $current_upstream_version" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+
+          clone_url="https://x-access-token:${SBO_SUBMIT_TOKEN}@github.com/${SBO_UPSTREAM}.git"
+          log "cloning $SBO_UPSTREAM@${UPSTREAM_REF} fresh"
+          git clone --quiet --depth 1 --branch "$UPSTREAM_REF" "$clone_url" "$workdir/upstream"
+
+          fresh_dir="$workdir/fresh"
+          generate_package "$prgnam" "$version" "$workdir/upstream" "$fresh_dir"
+
+          # --- drift check: fresh-derived output vs. what was reviewed in the PR -----
+          drifted=false
+          for f in "${PRGNAM}.info" "${PRGNAM}.SlackBuild"; do
+              if ! diff -q "$fresh_dir/$f" "$pkg_dir/$f" >/dev/null 2>&1; then
+                  drifted=true
+                  log "warning: $f differs between the reviewed copy and a fresh regeneration - upstream moved since review. Using the fresh copy."
+              fi
+          done
+
+          # --- push the branch + commit, using the fresh (not reviewed) files -------
+          upstream_pkg_dir="$workdir/upstream/${CATEGORY}/${PRGNAM}"
+          cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$upstream_pkg_dir/"
+
+          # pkg_dir is kept (not deleted) as the diff baseline for this package's
+          # *next* update PR - synced to the fresh copy, not the possibly-drifted
+          # reviewed one, so that baseline always reflects what was actually
+          # submitted. The next step commits this only if it changed.
+          cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
+
+          commit_msg="${CATEGORY}/${PRGNAM}: Updated for version ${version}"
+          branch="${PRGNAM}/${version}"
+
+          (
+              cd "$workdir/upstream"
+              git checkout --quiet -b "$branch"
+              git add "${CATEGORY}/${PRGNAM}/${PRGNAM}.info" "${CATEGORY}/${PRGNAM}/${PRGNAM}.SlackBuild"
+              git -c user.name="Julian Grinblat" -c user.email="julian@dotcore.co.il" \
+                  commit --quiet -m "$commit_msg"
+              git remote add fork "https://x-access-token:${SBO_SUBMIT_TOKEN}@github.com/${SBO_FORK}.git"
+              git push --quiet fork "HEAD:refs/heads/${branch}" --force-with-lease
+          )
+
+          fork_owner="${SBO_FORK%%/*}"
+          pr_body="Version bump generated by perrin4869/slackbuilds."
+          if [ "$drifted" = true ]; then
+              pr_body="${pr_body}
+
+          **Note:** the .info/.SlackBuild reviewed in perrin4869/slackbuilds were regenerated against a fresh copy of ${SBO_UPSTREAM}@${UPSTREAM_REF} at submit time and differ slightly from what was originally reviewed - upstream likely moved in the meantime. Please double check."
+          fi
+
+          pr_url="$(gh pr create \
+              --repo "$SBO_UPSTREAM" \
+              --base "$UPSTREAM_REF" \
+              --head "${fork_owner}:${branch}" \
+              --title "$commit_msg" \
+              --body "$pr_body")"
+
+          log "opened $pr_url"
+          echo "result=SUBMITTED $PRGNAM $version $pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Commit drift correction, if any
+        # The previous step synced <category>/<prgnam>/ to the fresh copy it
+        # actually submitted (not the possibly-stale reviewed copy) and left
+        # it in place - it's the diff baseline for this package's *next*
+        # update PR, not a one-off review artifact. Usually nothing changed
+        # (no drift), so there's nothing to commit.
+        env:
+          MATRIX_PACKAGE: ${{ matrix.package }}
+          SUBMIT_RESULT: ${{ steps.submit.outputs.result }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "$MATRIX_PACKAGE"; then
+            echo "no drift - already matched what was submitted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$MATRIX_PACKAGE"
+          printf 'chore: sync staged %s to what was actually submitted\n\n%s\n' \
+            "$(basename "$MATRIX_PACKAGE")" "$SUBMIT_RESULT" > /tmp/commit-msg.txt
+          git commit -F /tmp/commit-msg.txt
+
+          # Retries the PUSH itself, not just the rebase - master can move
+          # again between our rebase and our push (another matrix job's
+          # commit lands in that window), so a failed push needs a fresh
+          # fetch+rebase before trying again, not just a single push after
+          # one rebase attempt.
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:master; then
+              break
+            fi
+            [ "$i" -lt 5 ] || { echo "::error::failed to push after 5 attempts"; exit 1; }
+            git fetch origin master
+            git rebase origin/master
+            sleep $((i * 5))
+          done
