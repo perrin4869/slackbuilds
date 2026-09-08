@@ -121,60 +121,60 @@ upstream_version() {
     rm -f "$tmp"
 }
 
-# --- GitHub-hosted version resolution --------------------------------
+# --- GitHub/Codeberg-hosted version resolution --------------------------
 
-# Print every tag and release tag_name for a GitHub repo, deduped, one per
-# line. Both are queried because some projects (e.g. pinentry-dmenu) never
-# cut a formal Release, only tags.
-github_candidate_tags() {
-    local repo="$1"
-    {
-        gh api "repos/${repo}/tags" --paginate --jq '.[].name' 2>/dev/null || true
-        gh api "repos/${repo}/releases" --paginate --jq '.[].tag_name' 2>/dev/null || true
-    } | sort -u
-}
-
-# Resolve the highest version for a GitHub-sourced package whose tag names
-# match TAG_REGEX (a POSIX ERE anchored with ^...$, capture group 1 = the
-# version). Prints nothing if no tag matches.
+# Resolve the highest version for a github.com or codeberg.org package
+# whose tag names match TAG_REGEX (a POSIX ERE anchored with ^...$,
+# capture group 1 = the version). Prints nothing if no tag matches.
 #
 # TAG_REGEX exists because, measured against the repos this pipeline
 # actually tracks, "latest release" and "newest tag" are both unreliable:
 # scala3's releases/latest is an LTS backport older than what's shipped,
 # and newest-by-date tags include things like i3-gaps' "tree-pr4" or yq's
 # "vTestB". A per-package anchored regex is the only reliable filter.
-resolve_github_version() {
-    local repo="$1" regex="$2"
-    github_candidate_tags "$repo" \
-        | grep -E "$regex" \
-        | sed -E "s/$regex/\\1/" \
-        | sort -V | tail -1
+#
+# Goes through nvchecker's own github/gitea sources (already a dependency,
+# for POLL=1 packages) rather than hand-rolled API calls - one tool doing
+# every scan, not two doing the same job differently. use_max_tag scans
+# all tags directly (a superset of a repo's formal Releases, so nothing
+# is missed for a project like pinentry-dmenu that only ever tags).
+# nvchecker's own include_regex is a pure filter (whole-tag match, no
+# capture-group extraction - unlike TAG_REGEX everywhere else in this
+# file), so the matched raw tag is re-run through resolve_known_tag to
+# normalize it the same way every other path here does.
+resolve_scm_version() {
+    local kind="$1" repo="$2" regex="$3" host="${4:-}" workdir raw
+    workdir="$(mktemp -d)"
+    {
+        echo '[__config__]'
+        echo "oldver = \"$workdir/old.json\""
+        echo "newver = \"$workdir/new.json\""
+        echo
+        echo '[pkg]'
+        echo "source = \"$kind\""
+        echo "$kind = '''$repo'''"
+        echo 'use_max_tag = true'
+        echo "include_regex = '''$regex'''"
+        [ -n "$host" ] && echo "host = \"$host\""
+        # Same token used for gh api elsewhere - avoids nvchecker falling
+        # back to unauthenticated GitHub API rate limits.
+        [ "$kind" = github ] && [ -n "${GH_TOKEN:-}" ] && echo "token = \"$GH_TOKEN\""
+    } > "$workdir/config.toml"
+    echo '{}' > "$workdir/old.json"
+    nvchecker -c "$workdir/config.toml" >/dev/null 2>&1 || true
+    raw="$(jq -r '.data.pkg.version // empty' "$workdir/new.json" 2>/dev/null)"
+    rm -rf "$workdir"
+    [ -n "$raw" ] && resolve_known_tag "$raw" "$regex"
 }
 
-# --- Codeberg-hosted version resolution -------------------------------
-
-# Codeberg's API (Gitea) is shaped like GitHub's: same tags/releases split,
-# same reason for querying both (a project may only ever cut tags). Not
-# paginated beyond one page of 50 - every package this pipeline tracks on
-# Codeberg is small enough that its full tag history fits in one page; if
-# that stops being true, page through the same way resolve_github_version
-# lets `gh --paginate` do it for GitHub.
-codeberg_candidate_tags() {
-    local repo="$1"
-    {
-        curl -sf "https://codeberg.org/api/v1/repos/${repo}/tags?limit=50" \
-            | jq -r '.[].name' 2>/dev/null || true
-        curl -sf "https://codeberg.org/api/v1/repos/${repo}/releases?limit=50" \
-            | jq -r '.[].tag_name' 2>/dev/null || true
-    } | sort -u
+resolve_github_version() {
+    local repo="$1" regex="$2"
+    resolve_scm_version github "$repo" "$regex"
 }
 
 resolve_codeberg_version() {
     local repo="$1" regex="$2"
-    codeberg_candidate_tags "$repo" \
-        | grep -E "$regex" \
-        | sed -E "s/$regex/\\1/" \
-        | sort -V | tail -1
+    resolve_scm_version gitea "$repo" "$regex" codeberg.org
 }
 
 # Extract the version out of a single already-known tag (a webhook

@@ -83,12 +83,16 @@ duplicating it there would just be one more place to fall out of sync).
 check mechanism is inferred from its host - `github.com` or `codeberg.org`,
 the only two with a webhook-able API - and `TAG_REGEX` (anchored, capture
 group 1 = version) picks the real version tag out of everything else a repo
-tags (test tags, unrelated branches, LTS backports).
+tags (test tags, unrelated branches, LTS backports). Any actual scanning
+(`poll.yml`'s cron, or its ad hoc `workflow_dispatch` check of a single
+package) goes through [nvchecker](https://github.com/lilydjwg/nvchecker)'s
+own `github`/`gitea` sources rather than a hand-rolled API call - one tool
+for every scan, not two doing the same job differently.
 
 `POLL=1` marks a package with no webhook option at all - checked by
 `poll.yml` on a cron instead, via `NVCHECKER_URL`/`NVCHECKER_REGEX`
-([nvchecker](https://github.com/lilydjwg/nvchecker)'s own `regex` source
-fields). `wofi`/`libtraceevent` are the current examples - hg.sr.ht and cgit
+(nvchecker's `regex` source fields, for a host with no structured API at
+all). `wofi`/`libtraceevent` are the current examples - hg.sr.ht and cgit
 have no API for anything to watch.
 
 `STRATEGY` defaults to `tarball` and only needs to be set explicitly for

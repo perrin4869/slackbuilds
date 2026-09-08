@@ -25,6 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # resolve_github_version (used below) goes through nvchecker now,
+      # same as poll.yml.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install nvchecker
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install nvchecker
+
       # sbopkg is pinned via the Dockerfile's SBOPKG_VERSION ARG, fetched
       # from a specific GitHub release - so a new release opens a PR
       # bumping it; merging triggers image.yml's Dockerfile-change trigger.
