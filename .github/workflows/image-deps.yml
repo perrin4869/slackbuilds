@@ -115,4 +115,11 @@ jobs:
           fi
 
           echo "sbo-maintainer-tools $latest released (image has $current) - dispatching rebuild"
-          gh workflow run image.yml --ref master
+
+          # Not hardcoded "master" - image.yml's workflow_dispatch trigger
+          # only exists on whatever's actually the default branch (fails
+          # with "Workflow does not have 'workflow_dispatch' trigger"
+          # otherwise, e.g. while this pipeline's own PR is still open and
+          # unmerged).
+          default_branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef -q .defaultBranchRef.name)"
+          gh workflow run image.yml --ref "$default_branch"
