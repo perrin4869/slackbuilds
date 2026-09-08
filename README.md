@@ -46,6 +46,12 @@ upstream PR if that changes anything.
   from a fresh upstream checkout), `render_pr_body()`.
 - `scripts/rust-info.sh` - the crate-list generator for Rust packages
   (`X86_64_ONLY` selects `DOWNLOAD` vs `DOWNLOAD_x86_64`).
+- `scripts/update-package.sh <prgnam> <version>` - regenerates one
+  package's `sbo/<category>/<prgnam>/` locally, from a fresh upstream
+  checkout - a manual preview of what an update PR would contain. Only
+  touches the working tree; never commits, pushes, or opens anything.
+  `open-update-prs.yml` calls this same script in CI, so there's no
+  separate code path to drift out of sync.
 - `.github/workflows/open-update-prs.yml` - reusable workflow
   (`workflow_call`), called once per package that needs an update by both
   `webhook.yml` and `poll.yml` via `strategy: matrix`. Regenerates the

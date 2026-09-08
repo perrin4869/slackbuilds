@@ -43,35 +43,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Same regeneration a maintainer can run locally via
+      # scripts/update-package.sh - one script, so CI and a local preview
+      # can never drift apart.
       - name: Regenerate package
         env:
           # Passed via env, not interpolated into the script body - version
           # ultimately derives from upstream tag data, not just our own
           # packages/*.conf. See the security note in the repo README.
           INPUT_PRGNAM: ${{ inputs.prgnam }}
-          INPUT_CATEGORY: ${{ inputs.category }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          scripts/update-package.sh "$INPUT_PRGNAM" "$INPUT_VERSION"
+
           source scripts/lib.sh
-
-          # Lowercase locals, deliberately not PRGNAM/CATEGORY/VERSION -
-          # generate_package/render_pr_body call load_package_conf, which
-          # resets and re-sources those exact uppercase globals from the
-          # package's .conf. Using the same names here would get silently
-          # clobbered with the .conf's OLD values right after the first
-          # call (verified: it happened when this used uppercase names).
-          prgnam="$INPUT_PRGNAM" category="$INPUT_CATEGORY" version="$INPUT_VERSION"
-
-          upstream_dir="$(mktemp -d)"
-          git clone --quiet --depth 1 --branch master \
-              https://github.com/SlackBuildsOrg/slackbuilds.git "$upstream_dir"
-
-          rm -rf "sbo/${category}/${prgnam}"
-          mkdir -p "sbo/${category}/${prgnam}"
-          generate_package "$prgnam" "$version" "$upstream_dir" "sbo/${category}/${prgnam}"
-
-          render_pr_body "$prgnam" "$version" > /tmp/pr-body.md
+          render_pr_body "$INPUT_PRGNAM" "$INPUT_VERSION" > /tmp/pr-body.md
 
       # Not hardcoded "master" - fetched live so this still works if the
       # default branch is ever renamed (or, more immediately: while this
