@@ -30,9 +30,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@v1.3.1
+        uses: jlumbroso/free-disk-space@v2.0.0
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
 
       # /mnt alone has ample headroom for this image (measured ~66 GB free
       # vs. ~14.6 GB image size) - no need for a maintained action's more
