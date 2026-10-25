@@ -14,8 +14,8 @@ UPSTREAM_OWNER="SlackBuildsOrg"
 UPSTREAM_REPO="slackbuilds"
 UPSTREAM_REF="master"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 PACKAGES_DIR="$REPO_ROOT/packages"
 
 log() { printf '%s\n' "$*" >&2; }
