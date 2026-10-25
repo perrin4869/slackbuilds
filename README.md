@@ -155,6 +155,26 @@ touches `packages/*.conf`.
 | `NEWRELEASES_API_KEY` | `sync-newreleases.yml` | newreleases.io account API key. |
 | `NEWRELEASES_WEBHOOK_ID` | `sync-newreleases.yml` | Id of a webhook already configured by hand on newreleases.io (Settings > Webhooks), pointed at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches` with an `Authorization: Bearer <PAT>` header, `Accept: application/vnd.github+json`, and the payload template above. |
 
+## Security: untrusted values go through `env:`, never inline
+
+Several values this pipeline handles aren't fully trusted: a PR's changed-path
+diff (`matrix.package` in `check.yml`), a webhook payload's `project`/`version`
+fields, an upstream tag string - none of them are written by this repo, so
+none of them are inert text. GitHub expands `${{ }}` expressions by literal
+text substitution into a `run:` step's script *before* the shell ever sees
+it - if one of these values were interpolated directly into a script body
+(`echo ${{ matrix.package }}` rather than reading `$MATRIX_PACKAGE`), a value
+containing shell metacharacters would execute as part of the script, not be
+read as data. This is GitHub's documented "script injection" class of
+Actions vulnerability.
+
+The fix used everywhere in this repo: pass the value via `env:`, then
+reference it as `"$VAR"` inside the script. An env var's contents are only
+ever substituted as a shell *value*, never re-parsed as script syntax,
+regardless of what characters it contains. Keep this pattern for any new
+step that touches a diff path, a webhook/dispatch payload field, or anything
+else that ultimately comes from outside this repo.
+
 ## Why `check.yml` uses the `local` repo slot
 
 `check.yml` mounts the working tree at `/var/lib/sbopkg/local/local`, **not**
