@@ -70,11 +70,7 @@ jobs:
           # image.yml and the field's own comment in lib.sh. Empty means
           # the base image already has everything this package needs.
           load_package_conf "packages/${prgnam}.conf"
-          if [ -n "${CHECK_IMAGE:-}" ]; then
-            image="ghcr.io/perrin4869/slackbuilds-${CHECK_IMAGE}:15.0"
-          else
-            image="ghcr.io/perrin4869/slackbuilds:15.0"
-          fi
+          image="ghcr.io/perrin4869/slackbuilds${CHECK_IMAGE:+-$CHECK_IMAGE}:15.0"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
       # Fresh current master, not a pinned historical SHA - submit.yml
