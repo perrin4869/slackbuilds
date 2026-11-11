@@ -1,7 +1,7 @@
 PRGNAM="difftastic"
-VERSION="0.70.0"
+VERSION="0.71.0"
 HOMEPAGE="https://github.com/Wilfred/difftastic"
-DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftastic-0.70.0.tar.gz \
+DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.71.0/difftastic-0.71.0.tar.gz \
           https://static.crates.io/crates/aho-corasick/aho-corasick-1.1.3.crate \
           https://static.crates.io/crates/allocator-api2/allocator-api2-0.2.16.crate \
           https://static.crates.io/crates/anstream/anstream-0.6.15.crate \
@@ -11,7 +11,6 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/anstyle-wincon/anstyle-wincon-3.0.4.crate \
           https://static.crates.io/crates/assert_cmd/assert_cmd-2.0.17.crate \
           https://static.crates.io/crates/autocfg/autocfg-1.1.0.crate \
-          https://static.crates.io/crates/bitflags/bitflags-1.3.2.crate \
           https://static.crates.io/crates/bitflags/bitflags-2.5.0.crate \
           https://static.crates.io/crates/bstr/bstr-1.9.1.crate \
           https://static.crates.io/crates/bumpalo/bumpalo-3.20.3.crate \
@@ -24,8 +23,6 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/crossbeam-deque/crossbeam-deque-0.8.5.crate \
           https://static.crates.io/crates/crossbeam-epoch/crossbeam-epoch-0.9.20.crate \
           https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.19.crate \
-          https://static.crates.io/crates/crossterm/crossterm-0.28.1.crate \
-          https://static.crates.io/crates/crossterm_winapi/crossterm_winapi-0.9.1.crate \
           https://static.crates.io/crates/diff/diff-0.1.13.crate \
           https://static.crates.io/crates/difflib/difflib-0.4.0.crate \
           https://static.crates.io/crates/doc-comment/doc-comment-0.3.3.crate \
@@ -39,7 +36,7 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/float-cmp/float-cmp-0.10.0.crate \
           https://static.crates.io/crates/foldhash/foldhash-0.1.5.crate \
           https://static.crates.io/crates/foldhash/foldhash-0.2.0.crate \
-          https://static.crates.io/crates/glob/glob-0.3.1.crate \
+          https://static.crates.io/crates/glob/glob-0.3.4.crate \
           https://static.crates.io/crates/globset/globset-0.4.19.crate \
           https://static.crates.io/crates/hashbrown/hashbrown-0.15.5.crate \
           https://static.crates.io/crates/hashbrown/hashbrown-0.17.1.crate \
@@ -48,6 +45,7 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/humansize/humansize-2.1.3.crate \
           https://static.crates.io/crates/humantime/humantime-2.1.0.crate \
           https://static.crates.io/crates/ignore/ignore-0.4.29.crate \
+          https://static.crates.io/crates/imara-diff/imara-diff-0.2.0.crate \
           https://static.crates.io/crates/indexmap/indexmap-2.14.0.crate \
           https://static.crates.io/crates/is-terminal/is-terminal-0.4.12.crate \
           https://static.crates.io/crates/is_terminal_polyfill/is_terminal_polyfill-1.70.1.crate \
@@ -55,18 +53,14 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/lazy_static/lazy_static-1.4.0.crate \
           https://static.crates.io/crates/libc/libc-0.2.169.crate \
           https://static.crates.io/crates/libm/libm-0.2.8.crate \
-          https://static.crates.io/crates/line-numbers/line-numbers-0.3.0.crate \
+          https://static.crates.io/crates/line-numbers/line-numbers-0.3.1.crate \
           https://static.crates.io/crates/linux-raw-sys/linux-raw-sys-0.4.14.crate \
-          https://static.crates.io/crates/lock_api/lock_api-0.4.11.crate \
           https://static.crates.io/crates/log/log-0.4.21.crate \
           https://static.crates.io/crates/memchr/memchr-2.8.3.crate \
-          https://static.crates.io/crates/mio/mio-1.0.3.crate \
           https://static.crates.io/crates/nom/nom-8.0.0.crate \
           https://static.crates.io/crates/normalize-line-endings/normalize-line-endings-0.3.0.crate \
           https://static.crates.io/crates/num-traits/num-traits-0.2.19.crate \
           https://static.crates.io/crates/owo-colors/owo-colors-4.2.3.crate \
-          https://static.crates.io/crates/parking_lot/parking_lot-0.12.1.crate \
-          https://static.crates.io/crates/parking_lot_core/parking_lot_core-0.9.9.crate \
           https://static.crates.io/crates/petgraph/petgraph-0.8.3.crate \
           https://static.crates.io/crates/predicates/predicates-3.1.3.crate \
           https://static.crates.io/crates/predicates-core/predicates-core-1.0.6.crate \
@@ -78,7 +72,6 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/radix-heap/radix-heap-0.4.2.crate \
           https://static.crates.io/crates/rayon/rayon-1.10.0.crate \
           https://static.crates.io/crates/rayon-core/rayon-core-1.12.1.crate \
-          https://static.crates.io/crates/redox_syscall/redox_syscall-0.4.1.crate \
           https://static.crates.io/crates/regex/regex-1.12.2.crate \
           https://static.crates.io/crates/regex-automata/regex-automata-0.4.13.crate \
           https://static.crates.io/crates/regex-syntax/regex-syntax-0.8.8.crate \
@@ -86,15 +79,11 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/rustix/rustix-0.38.34.crate \
           https://static.crates.io/crates/ryu/ryu-1.0.17.crate \
           https://static.crates.io/crates/same-file/same-file-1.0.6.crate \
-          https://static.crates.io/crates/scopeguard/scopeguard-1.2.0.crate \
           https://static.crates.io/crates/serde/serde-1.0.228.crate \
           https://static.crates.io/crates/serde_core/serde_core-1.0.228.crate \
           https://static.crates.io/crates/serde_derive/serde_derive-1.0.228.crate \
           https://static.crates.io/crates/serde_json/serde_json-1.0.145.crate \
           https://static.crates.io/crates/shlex/shlex-1.3.0.crate \
-          https://static.crates.io/crates/signal-hook/signal-hook-0.3.17.crate \
-          https://static.crates.io/crates/signal-hook-mio/signal-hook-mio-0.2.4.crate \
-          https://static.crates.io/crates/signal-hook-registry/signal-hook-registry-1.4.1.crate \
           https://static.crates.io/crates/smallvec/smallvec-1.13.2.crate \
           https://static.crates.io/crates/streaming-iterator/streaming-iterator-0.1.9.crate \
           https://static.crates.io/crates/strsim/strsim-0.11.1.crate \
@@ -152,7 +141,7 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/tree-sitter-racket/tree-sitter-racket-0.24.7.crate \
           https://static.crates.io/crates/tree-sitter-ruby/tree-sitter-ruby-0.23.1.crate \
           https://static.crates.io/crates/tree-sitter-rust-orchard/tree-sitter-rust-orchard-0.16.6.crate \
-          https://static.crates.io/crates/tree-sitter-scala/tree-sitter-scala-0.26.0.crate \
+          https://static.crates.io/crates/tree-sitter-scala/tree-sitter-scala-0.26.2.crate \
           https://static.crates.io/crates/tree-sitter-scheme/tree-sitter-scheme-0.24.7.crate \
           https://static.crates.io/crates/tree-sitter-sequel/tree-sitter-sequel-0.3.11.crate \
           https://static.crates.io/crates/tree-sitter-sfapex/tree-sitter-sfapex-2.4.0.crate \
@@ -166,7 +155,7 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/tree-sitter-yaml/tree-sitter-yaml-0.7.2.crate \
           https://static.crates.io/crates/tree-sitter-zig/tree-sitter-zig-1.1.2.crate \
           https://static.crates.io/crates/tree_magic_mini/tree_magic_mini-3.2.2.crate \
-          https://static.crates.io/crates/ts-parser-perl/ts-parser-perl-1.0.1.crate \
+          https://static.crates.io/crates/ts-parser-perl/ts-parser-perl-1.2.1.crate \
           https://static.crates.io/crates/typed-arena/typed-arena-2.0.2.crate \
           https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.12.crate \
           https://static.crates.io/crates/unicode-width/unicode-width-0.2.2.crate \
@@ -174,33 +163,20 @@ DOWNLOAD="https://github.com/Wilfred/difftastic/archive/refs/tags/0.70.0/difftas
           https://static.crates.io/crates/version_check/version_check-0.9.4.crate \
           https://static.crates.io/crates/wait-timeout/wait-timeout-0.2.0.crate \
           https://static.crates.io/crates/walkdir/walkdir-2.5.0.crate \
-          https://static.crates.io/crates/wasi/wasi-0.11.0+wasi-snapshot-preview1.crate \
-          https://static.crates.io/crates/winapi/winapi-0.3.9.crate \
-          https://static.crates.io/crates/winapi-i686-pc-windows-gnu/winapi-i686-pc-windows-gnu-0.4.0.crate \
           https://static.crates.io/crates/winapi-util/winapi-util-0.1.9.crate \
-          https://static.crates.io/crates/winapi-x86_64-pc-windows-gnu/winapi-x86_64-pc-windows-gnu-0.4.0.crate \
           https://static.crates.io/crates/windows-sys/windows-sys-0.52.0.crate \
           https://static.crates.io/crates/windows-sys/windows-sys-0.59.0.crate \
-          https://static.crates.io/crates/windows-targets/windows-targets-0.48.5.crate \
           https://static.crates.io/crates/windows-targets/windows-targets-0.52.6.crate \
-          https://static.crates.io/crates/windows_aarch64_gnullvm/windows_aarch64_gnullvm-0.48.5.crate \
           https://static.crates.io/crates/windows_aarch64_gnullvm/windows_aarch64_gnullvm-0.52.6.crate \
-          https://static.crates.io/crates/windows_aarch64_msvc/windows_aarch64_msvc-0.48.5.crate \
           https://static.crates.io/crates/windows_aarch64_msvc/windows_aarch64_msvc-0.52.6.crate \
-          https://static.crates.io/crates/windows_i686_gnu/windows_i686_gnu-0.48.5.crate \
           https://static.crates.io/crates/windows_i686_gnu/windows_i686_gnu-0.52.6.crate \
           https://static.crates.io/crates/windows_i686_gnullvm/windows_i686_gnullvm-0.52.6.crate \
-          https://static.crates.io/crates/windows_i686_msvc/windows_i686_msvc-0.48.5.crate \
           https://static.crates.io/crates/windows_i686_msvc/windows_i686_msvc-0.52.6.crate \
-          https://static.crates.io/crates/windows_x86_64_gnu/windows_x86_64_gnu-0.48.5.crate \
           https://static.crates.io/crates/windows_x86_64_gnu/windows_x86_64_gnu-0.52.6.crate \
-          https://static.crates.io/crates/windows_x86_64_gnullvm/windows_x86_64_gnullvm-0.48.5.crate \
           https://static.crates.io/crates/windows_x86_64_gnullvm/windows_x86_64_gnullvm-0.52.6.crate \
-          https://static.crates.io/crates/windows_x86_64_msvc/windows_x86_64_msvc-0.48.5.crate \
           https://static.crates.io/crates/windows_x86_64_msvc/windows_x86_64_msvc-0.52.6.crate \
-          https://static.crates.io/crates/wu-diff/wu-diff-0.1.2.crate \
           https://static.crates.io/crates/yansi/yansi-1.0.1.crate"
-MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
+MD5SUM="dcaf17ba06d9b55c0751be7d5dcbd8f8 \
         03b2d126766ed746706241b4c7487654 \
         a2d3656a58d89472063fd35db901f137 \
         64c9c06c903f9515ece3705342362a9e \
@@ -210,7 +186,6 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         27ebd71018dd6d909d4332d755908610 \
         df2a93c50c7f1095dbfe831dbc41aadd \
         05d77ef52e90ad161fdd41b252420467 \
-        a295edb6953237ebbdfa8e731229f9a3 \
         f3406374808b01be3a263666aa9aa2f5 \
         db089af54479a055c39ca84bcf915f27 \
         b49bef030b7807d2e09679bd1ca726fb \
@@ -223,8 +198,6 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         396f4f63322338c26d76b2f638646178 \
         581342f2bc70d2c3604d6048b3e76c63 \
         398f4cce1d3067cc7a56662e52a33384 \
-        5b6abd7e90730e502165a9cd07ed858d \
-        81b4ce6014002d0cb0415aa401a51578 \
         434e2423f372fed80f69ed8873fdd2a3 \
         bebc8338ae113a87a04564c97c1e3f0c \
         dd1e49c76e9d5853e673a3b41ba02917 \
@@ -238,7 +211,7 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         489c3eacc30807ba11bfd7ddf4b1d277 \
         fc53a85c912427e1af1278d8f9ef2aa4 \
         e36ee995fbd928f67773e5dbca035c5e \
-        2d6d28ec311884da69bcaf320ada8ad5 \
+        db367be7383d10ab8b259b6239b04ee1 \
         4e720cbe564eba9560028f4c060ec94b \
         ff62c1415be32ef6642213c9ae175170 \
         0eb0705fa0086caab7c05b627bf907e0 \
@@ -247,6 +220,7 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         26570de3ac165280c441fb77ecd68ede \
         c01022fe0357c10ca1d48b16187f81bd \
         169109340956e346a53daba284acc407 \
+        d23c112a60ae3c4c9a7eca49a614f5a2 \
         a012c952ad98592238b0380344417062 \
         a5ff7ccb5fe4fc981cff7abfde30ae88 \
         83cd180e6991b62b1cc6d646bf4d0284 \
@@ -254,18 +228,14 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         fba3b040a55c01be7376d3dd5c4d4920 \
         3642745840be485f7de1ecfe80044007 \
         23fb13a7f6fb7b25a42d71c3bcaa5d7c \
-        4a280b940e49c6359cea251d87cd9295 \
+        119dba7c02a48099ca3a51591914b29a \
         6d16890925497732bdbedd7636c9546f \
-        cc1b0e90e372869ad03ef40bd53fa30f \
         5a376ab3f01ed9e90e8d71e1d5fa6ae7 \
         9adcf2c7158534a48abb00f49595a8ea \
-        8c5b656fbc77cf40ea254ccea0bb189d \
         6c8d8924a13f7f3e91dbf4897b2e2f4d \
         f9ddf92ded75c1df47b2dd1379a482fd \
         e092b3abcc54806f2a35889d725bf95f \
         c8114091109e2dbf6c37106569d12caa \
-        1be45f99109d447849f4244b58c5a470 \
-        7502c2f15026ee3e6a01f57b92942771 \
         8126d1d3633176c93cba4ab07c840f3a \
         f45921516240e2ef3110ea375fd20269 \
         be08d75820c528ad6143e9e42efccee0 \
@@ -277,7 +247,6 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         a08c470deeb4bbe558bb1ec8f375c5b0 \
         7ee7a2b2f09d09fa2b1fb4c594fc8396 \
         7604a19f6ff2021e9fc02f9bce604494 \
-        ff1d093069cfc9eb161907e17a51208b \
         fa1ef10465c00f2a3bac42b79e37b36d \
         19e088c4bd35dc2ed9abdfe6a084f50f \
         185f5eacb104bf57aac0702e59e1a29e \
@@ -285,15 +254,11 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         b815e6cf70bcc3512ffbef7f6dea8c5f \
         feefd8369d6dd6a0f269bbed1b921349 \
         2d8d8b377d144f5e32b4f65a69eb0b24 \
-        f1358be8c98b98837cbd2cf51e75f8b3 \
         d156b7c4a314664880656902717747ed \
         60d4c4f575afc314d644677feb1289c1 \
         45ca53c87e6fb9748e740a9298e2c14c \
         1aa4772ebdc965df9afde4eb75825b2b \
         6c623a8eed8450399ec323a72e96855c \
-        f60ab8537f924a65fbc0961e958d375b \
-        dee87bd305cac02d8fba62501664c431 \
-        22e95901b912671da26457ac33e36a23 \
         50d5a501f911bb592f0dce2d052c2aa8 \
         930c957fcc26e9d3aa098149861d44c0 \
         fbe5da24bd1beef6125107ee41118187 \
@@ -351,7 +316,7 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         823d26b725dc0a3ded842525f59d2130 \
         422cc4112177dab2d324545c743ec884 \
         0c56ffb02ea87e06755f2c8a8cd15a3c \
-        738711bd6194cac7a81def9557fc88e1 \
+        602e64cf0aed4ee18d839e0c53d257c5 \
         dcd8daf8885c1cee5e60c97923da4762 \
         8932be10712c78d296a5b862bc56c6c2 \
         ef8a9cceb3311f4d5f7e7b0965084358 \
@@ -365,7 +330,7 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         69d4132cd15cad27178a018b4a9be7f1 \
         ba112ec298970caaa022bf177e4a0253 \
         2a6415eaf83a2f45e600253f15a8957b \
-        2e359e419496871b77c8fa71392fe0aa \
+        6463df8dc4482c0f2538cdc63dbbb5df \
         f527f2d51c624ef142c8a59820af1e0f \
         ca65153603a1a7240bbd9d2ce19f2d67 \
         2a4b3962d2e873cc03ad5bd46fee8896 \
@@ -373,31 +338,18 @@ MD5SUM="cb1c6c3a5b3102f47588301b07bea3d2 \
         d18d362345c4fe512ef67b738b239fb8 \
         6708629acf3d2ecb7404e43255d2df85 \
         f38b27b8c9625110a51293658f1cc014 \
-        e972ea58ec203bfa6c79c1207852298b \
-        0498c4a11448bfc35dc7bb2caa64c753 \
-        db96b50050277bf05a3c68534bbb9586 \
         e908e1808f2a480449f8d86281ae24ef \
-        09de9d01e7331ff3da11f58be8bef0df \
         2376de634160158ece40c4bc2ab3eb41 \
         73b177d6d000daaa8f05790414a887a3 \
-        24c64817e85ef77765ed0f26c31c9b4c \
         9e876a38acd8262d97e9302ecb4e0f72 \
-        dae6d89034a6988042fd8be4cf5e037d \
         8c8adde50f0a531c407c5b68ab928f0b \
-        de2839e16d9d7a9fd1c397da62f62b4a \
         233b17dfcf7e49ac791eef30b7f406e3 \
-        e0c35ffb8cfdb74a39bf799811f79304 \
         7cb99b00381f697eaf8a322ed3b8205c \
         1baf62319b533f3d996993b82305e547 \
-        d990172b607020701f9e84ca8e1c043c \
         311ded6588844e072d3fb953a8f994da \
-        0a68848588e847ceccf504891584d00b \
         3f265cbde7668f38c1229043475470a9 \
-        45b469ad607b912256b7c80141fa2d17 \
         4e50e886c72204c268c15a3230001d71 \
-        7799baff9a5664205d9110a2624e8989 \
         b95760e9133ba1bb456d0f0cef74c9a4 \
-        1a39688856c9a9cc91ff8c45790aa3ed \
         72329d464b2313251d07d25f7d14723c"
 DOWNLOAD_x86_64=""
 MD5SUM_x86_64=""
