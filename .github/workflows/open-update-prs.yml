@@ -93,7 +93,7 @@ jobs:
       # step below is the real notification mechanism.
       - name: Open update PR
         id: pr
-        uses: peter-evans/create-pull-request@v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.3
         with:
           token: ${{ secrets.SBO_UPDATE_PR_TOKEN }}
           title: "${{ inputs.category }}/${{ inputs.prgnam }}: Updated for version ${{ inputs.version }}"
