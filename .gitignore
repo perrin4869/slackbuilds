@@ -1,3 +1,8 @@
 *.tar.gz
 *.tgz
 *.crate
+
+# rust-info.sh / rust64-info.sh intermediate output (used both ad hoc at the
+# repo root and by scripts/generate.sh under staging/)
+CRATES/
+DEBUG/
