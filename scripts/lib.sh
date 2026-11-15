@@ -1,56 +1,38 @@
 #!/bin/bash
-# Shared helpers, sourced directly by workflow run: steps (there are no
-# detect.sh/generate.sh/submit.sh scripts - everything here is a function).
-#
-# Conventions used throughout this pipeline:
-#  - "upstream" always means SlackBuildsOrg/slackbuilds@master, fetched fresh.
-#    Nothing in this repo (per-package dirs under sbo/) is ever treated as a
-#    base to diff or build against - see the plan's "Hard constraint".
-#  - Package configs live in packages/<prgnam>.conf and are sourced, not parsed.
+# Shared helpers, sourced by workflow steps and scripts/update-package.sh.
+# "Upstream" always means SlackBuildsOrg/slackbuilds@master, fetched fresh.
 
 set -euo pipefail
 
 UPSTREAM_OWNER="SlackBuildsOrg"
 UPSTREAM_REPO="slackbuilds"
 UPSTREAM_REF="master"
+SBO_FORK="perrin4869/sbo"
 
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 PACKAGES_DIR="$REPO_ROOT/packages"
+SBO_DIR="$REPO_ROOT/sbo"
 
 log() { printf '%s\n' "$*" >&2; }
 die() { log "error: $*"; exit 1; }
 
 # --- package config -----------------------------------------------------
 
-# Source a packages/<prgnam>.conf file into the current shell, after
-# resetting the fields it's allowed to set. Keeps one package's leftover
-# vars from bleeding into the next when looping over all configs.
+# Reset first so one package's fields don't leak into the next.
 load_package_conf() {
     local conf="$1"
     CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        STRATEGY= DOWNLOAD_URL= X86_64_ONLY=0 FROZEN=0 FROZEN_REASON= \
+        STRATEGY=tarball DOWNLOAD_URL= X86_64_ONLY=0 FROZEN=0 FROZEN_REASON= \
         CHECK_IMAGE=
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"
     [ -n "$CATEGORY" ] || die "$conf: CATEGORY not set"
     [ -n "$SOURCE" ] || die "$conf: SOURCE not set"
-    # Most packages are a single source tarball with no special vendoring -
-    # STRATEGY is only worth naming explicitly for the rust case (a vendored
-    # crate build). Orthogonal to X86_64_ONLY (arch support), which either
-    # STRATEGY can set independently.
-    STRATEGY="${STRATEGY:-tarball}"
-    # CHECK_IMAGE names a derived image (ghcr.io/perrin4869/slackbuilds-
-    # <variant>:15.0) with an expensive toolchain dependency pre-baked in,
-    # for check.yml to build against instead of the base image - empty
-    # means the base image is enough. See check.yml for how this is used.
 }
 
-# Strip a known host prefix off a github.com/codeberg.org SOURCE URL,
-# leaving "owner/repo". A no-op (returns $1 unchanged) for anything else -
-# safe to call unconditionally, since the result is only ever compared
-# against a github/codeberg "owner/repo" string, never used standalone.
+# "owner/repo" from a github.com/codeberg.org URL; anything else unchanged.
 repo_path_from_url() {
     local url="$1"
     url="${url#https://github.com/}"
@@ -58,14 +40,10 @@ repo_path_from_url() {
     printf '%s' "${url%/}"
 }
 
-# Print the PRGNAM whose packages/*.conf's SOURCE (a github.com/codeberg.org
-# URL) resolves to $1 (an "owner/repo" string), or nothing if none matches.
-# Lets a repository_dispatch payload that names the upstream project which
-# changed scope detection to that one package, instead of re-checking every
-# package on every webhook firing.
+# PRGNAM whose SOURCE is the "owner/repo" in $1, or nothing.
 find_package_by_repo() {
     local repo="$1" conf
-    for conf in packages/*.conf; do
+    for conf in "$PACKAGES_DIR"/*.conf; do
         [ -e "$conf" ] || continue
         load_package_conf "$conf"
         if [ "$(repo_path_from_url "$SOURCE")" = "$repo" ]; then
@@ -75,7 +53,6 @@ find_package_by_repo() {
     done
 }
 
-# %VERSION% substitution used in DOWNLOAD_URL / ARCHIVE / PRGDIR templates.
 subst_version() {
     local template="$1" version="$2"
     printf '%s' "${template//%VERSION%/$version}"
@@ -83,230 +60,118 @@ subst_version() {
 
 # --- .info parsing --------------------------------------------------
 
-# Read a single-line KEY="value" field out of an .info file. Only matches
-# lines that open AND close their quote on the same line, so it correctly
-# ignores the interior lines of a multi-line DOWNLOAD/MD5SUM block (those
-# lines end in a trailing backslash, not a quote) without picking up a
-# partial value.
+# Single-line KEY="value" only; continuation lines of multi-line
+# DOWNLOAD/MD5SUM end in a backslash and don't match.
 info_get() {
     local file="$1" key="$2"
     sed -n "s/^${key}=\"\\(.*\\)\"\$/\\1/p" "$file" | head -1
 }
 
-# --- version comparison --------------------------------------------------
-
-# True if $1 > $2 as Slackware/SBo-style dotted versions.
 version_gt() {
     [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
 }
 
 # --- upstream fetch -------------------------------------------------
 
-# Print the raw contents of a file from SlackBuildsOrg/slackbuilds@master.
-# Empty output if the file doesn't exist - callers treat that as "package
-# not in upstream yet".
+# Empty output if the file doesn't exist upstream.
 fetch_upstream_file() {
-    local path="$1"
-    gh api "repos/${UPSTREAM_OWNER}/${UPSTREAM_REPO}/contents/${path}?ref=${UPSTREAM_REF}" \
+    local path="$1" ref="${2:-$UPSTREAM_REF}"
+    gh api "repos/${UPSTREAM_OWNER}/${UPSTREAM_REPO}/contents/${path}?ref=${ref}" \
         -H 'Accept: application/vnd.github.raw' 2>/dev/null || true
 }
 
-# Print VERSION as currently shipped in SlackBuildsOrg/slackbuilds for a
-# given category/prgnam, or nothing if the package isn't there.
+# Usage: upstream_version <category> <prgnam> [ref]
 upstream_version() {
-    local category="$1" prgnam="$2" tmp
-    tmp="$(mktemp)"
-    fetch_upstream_file "${category}/${prgnam}/${prgnam}.info" > "$tmp"
-    [ -s "$tmp" ] && info_get "$tmp" VERSION
-    rm -f "$tmp"
+    local category="$1" prgnam="$2" ref="${3:-$UPSTREAM_REF}"
+    fetch_upstream_file "${category}/${prgnam}/${prgnam}.info" "$ref" | info_get /dev/stdin VERSION
 }
 
-# --- GitHub/Codeberg-hosted version resolution --------------------------
+# --- version resolution ---------------------------------------------
 
-# Resolve the highest version for a github.com or codeberg.org package
-# whose tag names match TAG_REGEX (a POSIX ERE anchored with ^...$,
-# capture group 1 = the version). Prints nothing if no tag matches.
-#
-# TAG_REGEX exists because, measured against the repos this pipeline
-# actually tracks, "latest release" and "newest tag" are both unreliable:
-# scala3's releases/latest is an LTS backport older than what's shipped,
-# and newest-by-date tags include things like i3-gaps' "tree-pr4" or yq's
-# "vTestB". A per-package anchored regex is the only reliable filter.
-#
-# Goes through nvchecker's own github/gitea sources (already a dependency,
-# for POLL=1 packages) rather than hand-rolled API calls - one tool doing
-# every scan, not two doing the same job differently. use_max_tag scans
-# all tags directly (a superset of a repo's formal Releases, so nothing
-# is missed for a project like pinentry-dmenu that only ever tags).
-# nvchecker's own include_regex is a pure filter (whole-tag match, no
-# capture-group extraction - unlike TAG_REGEX everywhere else in this
-# file), so the matched raw tag is re-run through resolve_known_tag to
-# normalize it the same way every other path here does.
-resolve_scm_version() {
-    local kind="$1" repo="$2" regex="$3" host="${4:-}" workdir raw
+# Run nvchecker on one [pkg] entry (TOML body on stdin), print the version.
+nvchecker_version() {
+    local workdir
     workdir="$(mktemp -d)"
     {
-        echo '[__config__]'
-        echo "oldver = \"$workdir/old.json\""
-        echo "newver = \"$workdir/new.json\""
-        echo
-        echo '[pkg]'
-        echo "source = \"$kind\""
-        echo "$kind = '''$repo'''"
-        echo 'use_max_tag = true'
-        echo "include_regex = '''$regex'''"
-        [ -n "$host" ] && echo "host = \"$host\""
-        # Same token used for gh api elsewhere - avoids nvchecker falling
-        # back to unauthenticated GitHub API rate limits.
-        [ "$kind" = github ] && [ -n "${GH_TOKEN:-}" ] && echo "token = \"$GH_TOKEN\""
+        printf '[__config__]\noldver = "%s/old.json"\nnewver = "%s/new.json"\n\n[pkg]\n' \
+            "$workdir" "$workdir"
+        cat
     } > "$workdir/config.toml"
     echo '{}' > "$workdir/old.json"
-    nvchecker -c "$workdir/config.toml" >/dev/null 2>&1 || true
-    raw="$(jq -r '.data.pkg.version // empty' "$workdir/new.json" 2>/dev/null)"
+    nvchecker -l warning -c "$workdir/config.toml" >&2 || log "warn: nvchecker failed"
+    jq -r '.data.pkg.version // empty' "$workdir/new.json" 2>/dev/null || true
     rm -rf "$workdir"
-    [ -n "$raw" ] && resolve_known_tag "$raw" "$regex"
 }
 
-resolve_github_version() {
-    local repo="$1" regex="$2"
-    resolve_scm_version github "$repo" "$regex"
+# Highest tag of a github/gitea repo matching $regex, normalized to its
+# capture group. TAG_REGEX is needed because neither "latest release" nor
+# "newest tag" is reliable across the repos tracked here.
+resolve_scm_version() {
+    local kind="$1" repo="$2" regex="$3" host="${4:-}" raw
+    raw="$(
+        {
+            echo "source = \"$kind\""
+            echo "$kind = '''$repo'''"
+            echo 'use_max_tag = true'
+            echo "include_regex = '''$regex'''"
+            [ -z "$host" ] || echo "host = \"$host\""
+            [ "$kind" != github ] || [ -z "${GH_TOKEN:-}" ] || echo "token = \"$GH_TOKEN\""
+        } | nvchecker_version
+    )"
+    [ -z "$raw" ] || resolve_known_tag "$raw" "$regex"
 }
 
-resolve_codeberg_version() {
-    local repo="$1" regex="$2"
-    resolve_scm_version gitea "$repo" "$regex" codeberg.org
-}
-
-# Extract the version out of a single already-known tag (a webhook
-# payload's own version field) using TAG_REGEX, instead of scanning every
-# tag for candidates - the tag is trusted as-is (see check_one: still
-# subject to the normal version_gt-against-upstream check, and a human
-# reviewing the resulting PR before merge), TAG_REGEX just normalizes its
-# format the same way it would if found via a full scan. Prints nothing
-# if it doesn't match, so the caller can fall back to that full scan.
+# Version out of a known tag via TAG_REGEX; nothing if it doesn't match.
 resolve_known_tag() {
     local tag="$1" regex="$2"
     printf '%s' "$tag" | grep -E "$regex" | sed -E "s/$regex/\\1/"
 }
 
-# --- kernel.org cgit version resolution --------------------------------
-
-# cgit has no JSON API; scrape the /refs/ page's "Tag" column, which links
-# to each tag as `.../tag/?h=<tagname>`. Works for any cgit instance, not
-# just kernel.org, in case another package ever needs it.
-cgit_candidate_tags() {
-    local cgit_url="$1"
-    curl -sf "${cgit_url%/}/refs/" \
-        | grep -oE "tag/\?h=[^'\"]+" | sed -E "s#tag/\?h=##" | sort -u
-}
-
-resolve_kernel_cgit_version() {
-    local cgit_url="$1" regex="$2"
-    cgit_candidate_tags "$cgit_url" \
-        | grep -E "$regex" \
-        | sed -E "s/$regex/\\1/" \
-        | sort -V | tail -1
-}
-
-# --- nvchecker version resolution (POLL=1 packages) ---------------------
-
-# nvchecker's `regex` source: fetch $url, apply $regex directly against the
-# page, take the max (by nvchecker's own version sort) of every match's
-# capture group. Used for POLL=1 packages, tracked by poll.yml - a
-# maintained tool instead of another bespoke scraper like
-# resolve_kernel_cgit_version above (kept as-is only because it's already
-# in use elsewhere - see image-deps.yml).
-#
-# $regex is written into the TOML as a triple-single-quoted literal
-# string (no escaping of any kind, including embedded quote characters)
-# rather than interpolated into a shell command - avoids the same class of
-# quoting problems as CGIT_URL-style scraping without needing $regex
-# itself to avoid quote characters (though in practice ours do, since they
-# match version characters directly rather than "everything until a
-# quote").
-resolve_nvchecker_version() {
-    local url="$1" regex="$2" workdir
-    workdir="$(mktemp -d)"
-    cat > "$workdir/config.toml" <<TOML
-[__config__]
-oldver = "$workdir/old.json"
-newver = "$workdir/new.json"
-
-[pkg]
-source = "regex"
-url = '''$url'''
-regex = '''$regex'''
-TOML
-    echo '{}' > "$workdir/old.json"
-    nvchecker -c "$workdir/config.toml" >/dev/null 2>&1 || true
-    jq -r '.data.pkg.version // empty' "$workdir/new.json" 2>/dev/null
-    rm -rf "$workdir"
-}
-
-# --- detection orchestration --------------------------------------------
-
-# An update is only "needed" if it beats what upstream currently ships AND
-# there's no open PR for it already here (an update PR bumps this repo's
-# own tracked sbo/.info in the same commit, but that only lands on master
-# once the PR merges - until then, this branch-name check is what stops a
-# second PR for the same version from being opened while the first is
-# still in review).
-already_pending() {
-    local prgnam="$1" version="$2"
-    gh pr list --repo "$(git config --get remote.origin.url | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#')" \
-        --state open --head "update/${prgnam}-${version}" --json number --jq 'length > 0' 2>/dev/null || echo false
-}
-
-# SOURCE is just the repo's endpoint URL - it says where the code lives,
-# not how to check it for updates. Resolution is: POLL=1 always means
-# nvchecker (SOURCE, in that case, is whatever page nvchecker isn't
-# already told to scrape via NVCHECKER_URL - typically the repo's
-# homepage, not consulted here); otherwise it's inferred from SOURCE's
-# host, since that's the only thing that actually determines which API is
-# available (github.com and codeberg.org have one; an arbitrary
-# self-hosted cgit/hg server doesn't, hence POLL=1 for those).
+# POLL=1 uses nvchecker's regex source on NVCHECKER_URL (hosts with no
+# API); otherwise SOURCE's host picks the nvchecker source.
 resolve_latest() {
-    if [ "${POLL:-0}" = "1" ]; then
-        [ -n "${NVCHECKER_URL:-}" ] || die "$PRGNAM: POLL=1 but NVCHECKER_URL not set"
-        [ -n "${NVCHECKER_REGEX:-}" ] || die "$PRGNAM: POLL=1 but NVCHECKER_REGEX not set"
-        resolve_nvchecker_version "$NVCHECKER_URL" "$NVCHECKER_REGEX"
+    if [ "$POLL" = 1 ]; then
+        [ -n "$NVCHECKER_URL" ] || die "$PRGNAM: POLL=1 but NVCHECKER_URL not set"
+        [ -n "$NVCHECKER_REGEX" ] || die "$PRGNAM: POLL=1 but NVCHECKER_REGEX not set"
+        printf "source = \"regex\"\nurl = '''%s'''\nregex = '''%s'''\n" \
+            "$NVCHECKER_URL" "$NVCHECKER_REGEX" | nvchecker_version
         return
     fi
 
-    [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: TAG_REGEX not set"
+    [ -n "$TAG_REGEX" ] || die "$PRGNAM: TAG_REGEX not set"
     case "$SOURCE" in
         https://github.com/*)
-            resolve_github_version "$(repo_path_from_url "$SOURCE")" "$TAG_REGEX"
-            ;;
+            resolve_scm_version github "$(repo_path_from_url "$SOURCE")" "$TAG_REGEX" ;;
         https://codeberg.org/*)
-            resolve_codeberg_version "$(repo_path_from_url "$SOURCE")" "$TAG_REGEX"
-            ;;
+            resolve_scm_version gitea "$(repo_path_from_url "$SOURCE")" "$TAG_REGEX" codeberg.org ;;
         *)
-            die "$PRGNAM: no resolver for SOURCE=$SOURCE (not github.com/codeberg.org, and POLL isn't set)"
-            ;;
+            die "$PRGNAM: no resolver for SOURCE=$SOURCE (not github.com/codeberg.org, and POLL isn't set)" ;;
     esac
 }
 
-# Given a package conf already loaded (CATEGORY/PRGNAM/etc in scope) and a
-# resolved candidate version (possibly empty - "couldn't resolve one"),
-# decide what to do about it and print one status line:
-#   NEEDS_UPDATE <prgnam> <category> <new_version>   an update PR should be opened
-#   FROZEN <prgnam> <reason> (N behind: <latest>)     skipped, reported for the summary
-#   UP_TO_DATE <prgnam> <version>                     nothing to do
-#   UNRESOLVED <prgnam>                               couldn't determine a latest version
-#
-# Shared by check_one (resolves $latest by scanning - poll.yml's job) and
-# check_known (webhook.yml's job: $latest is already known, from the
-# webhook payload) - what to do with a candidate version is identical
-# either way, only how it was obtained differs.
+# --- detection --------------------------------------------------------
+
+# VERSION on this package's open update PR, or nothing if there is none.
+pending_version() {
+    local repo branch="update/${PRGNAM}" open
+    repo="${GITHUB_REPOSITORY:-$(cd "$REPO_ROOT" && gh repo view --json nameWithOwner -q .nameWithOwner)}"
+    open="$(gh pr list --repo "$repo" --state open --head "$branch" --json number --jq length 2>/dev/null || echo 0)"
+    [ "$open" -gt 0 ] || return 0
+    { gh api "repos/${repo}/contents/sbo/${CATEGORY}/${PRGNAM}/${PRGNAM}.info?ref=${branch}" \
+        -H 'Accept: application/vnd.github.raw' 2>/dev/null || true; } | info_get /dev/stdin VERSION
+}
+
+# Given a loaded conf and a candidate version (empty = unresolved), print
+# one status line:
+#   NEEDS_UPDATE <prgnam> <category> <version>
+#   FROZEN <prgnam> <reason> [(behind: <latest>)]
+#   UP_TO_DATE <prgnam> <version>
+#   UNRESOLVED <prgnam>
 check_result() {
-    local latest="$1"
+    local latest="$1" tracked upstream pending
+    tracked="$(info_get "$SBO_DIR/${CATEGORY}/${PRGNAM}/${PRGNAM}.info" VERSION 2>/dev/null || true)"
 
-    # Our own last-known version, from this repo's own tracked copy.
-    local tracked
-    tracked="$(info_get "sbo/${CATEGORY}/${PRGNAM}/${PRGNAM}.info" VERSION 2>/dev/null || true)"
-
-    if [ "${FROZEN:-0}" = "1" ]; then
+    if [ "$FROZEN" = 1 ]; then
         if [ -n "$latest" ] && version_gt "$latest" "$tracked"; then
             echo "FROZEN $PRGNAM ${FROZEN_REASON:-frozen} (behind: $latest)"
         else
@@ -320,7 +185,6 @@ check_result() {
         return
     fi
 
-    local upstream
     upstream="$(upstream_version "$CATEGORY" "$PRGNAM")"
     if [ -z "$upstream" ]; then
         log "warn: $PRGNAM: not found at ${CATEGORY}/${PRGNAM} upstream (moved/renamed?)"
@@ -332,69 +196,67 @@ check_result() {
         return
     fi
 
-    if [ "$(already_pending "$PRGNAM" "$latest")" = "true" ]; then
-        log "info: $PRGNAM: PR for $latest already open, skipping"
-        echo "UP_TO_DATE $PRGNAM $upstream"
+    pending="$(pending_version)"
+    if [ -n "$pending" ] && ! version_gt "$latest" "$pending"; then
+        log "info: $PRGNAM: open PR already has $pending"
+        echo "UP_TO_DATE $PRGNAM $upstream (PR open for $pending)"
         return
     fi
 
     echo "NEEDS_UPDATE $PRGNAM $CATEGORY $latest"
 }
 
-# Resolve $conf's latest version by scanning (resolve_latest) and print
-# its status line. Used only by poll.yml; webhook.yml already has a
-# version from the webhook payload and uses check_known instead, since
-# re-scanning to confirm what newreleases.io just told us would defeat
-# the point of it telling us.
+# poll.yml: resolve the latest version by scanning.
 check_one() {
-    local conf="$1"
+    local conf="$1" latest
     load_package_conf "$conf"
-    local latest
     latest="$(resolve_latest || true)"
     check_result "$latest"
 }
 
-# Like check_one, but $known_version is already known for this package (a
-# webhook payload's own version field) rather than something to resolve
-# by scanning. Extracts/normalizes it via TAG_REGEX the same way a scan
-# would (see resolve_known_tag); if it doesn't match, reports UNRESOLVED
-# rather than falling back to a scan here - that's poll.yml's job, on its
-# own schedule, not something webhook.yml also does on every firing.
+# webhook.yml: the version comes from the webhook payload.
 check_known() {
-    local conf="$1" known_version="$2"
+    local conf="$1" known_version="$2" latest
     load_package_conf "$conf"
-    [ "${POLL:-0}" != "1" ] || die "$PRGNAM: POLL=1, has no webhook option - shouldn't reach check_known"
-    [ -n "${TAG_REGEX:-}" ] || die "$PRGNAM: TAG_REGEX not set"
-    local latest
+    [ "$POLL" != 1 ] || die "$PRGNAM: POLL=1 has no webhook"
+    [ -n "$TAG_REGEX" ] || die "$PRGNAM: TAG_REGEX not set"
     latest="$(resolve_known_tag "$known_version" "$TAG_REGEX" || true)"
     check_result "$latest"
 }
 
+# Markdown table of status lines (stdin) for $GITHUB_STEP_SUMMARY.
+results_summary() {
+    local title="$1" status prgnam rest
+    printf '## %s\n\n| status | package | detail |\n|---|---|---|\n' "$title"
+    while IFS=' ' read -r status prgnam rest; do
+        [ -n "$status" ] || continue
+        printf '| %s | %s | %s |\n' "$status" "$prgnam" "$rest"
+    done
+}
+
+# JSON matrix of the NEEDS_UPDATE status lines (stdin).
+results_matrix() {
+    jq -R -s -c '[splits("\n") | split(" ") | select(.[0] == "NEEDS_UPDATE")
+        | {prgnam: .[1], category: .[2], version: .[3]}]'
+}
+
 # --- package generation ---------------------------------------------------
-# Used once per job by two different workflow files -
-# open-update-prs.yml's own step and submit.yml's - so it stays a plain
-# function here rather than one workflow owning it.
-#
-# Produces an updated .info + .SlackBuild for one package at a target
-# version, derived from a *fresh* upstream checkout - never from anything
-# already in this repo. See this file's header for why.
+
+# Write <prgnam>.info and <prgnam>.SlackBuild for <version> into <out_dir>,
+# derived from <upstream_checkout_dir> (a SlackBuildsOrg/slackbuilds
+# checkout), never from this repo's copy.
 #
 # Usage: generate_package <prgnam> <version> <upstream_checkout_dir> <out_dir>
-#
-# <upstream_checkout_dir> must be a checkout of SlackBuildsOrg/slackbuilds
-# containing <category>/<prgnam>/. <out_dir> is created and populated with
-# <prgnam>.info and <prgnam>.SlackBuild.
 generate_package() {
     local prgnam="${1:?prgnam required}" version="${2:?version required}" \
         upstream_dir="${3:?upstream checkout dir required}" out_dir="${4:?output dir required}"
 
-    local conf="packages/${prgnam}.conf"
+    local conf="$PACKAGES_DIR/${prgnam}.conf"
     [ -f "$conf" ] || die "no such package config: $conf"
     load_package_conf "$conf"
-    [ "$prgnam" = "$PRGNAM" ] || die "packages/${prgnam}.conf declares PRGNAM=$PRGNAM"
+    [ "$prgnam" = "$PRGNAM" ] || die "$conf declares PRGNAM=$PRGNAM"
 
     local src_pkg_dir="${upstream_dir}/${CATEGORY}/${PRGNAM}"
-    [ -d "$src_pkg_dir" ] || die "not found in upstream checkout: $src_pkg_dir"
     [ -f "$src_pkg_dir/${PRGNAM}.info" ] || die "missing ${PRGNAM}.info in $src_pkg_dir"
     [ -f "$src_pkg_dir/${PRGNAM}.SlackBuild" ] || die "missing ${PRGNAM}.SlackBuild in $src_pkg_dir"
 
@@ -404,51 +266,33 @@ generate_package() {
     # shellcheck disable=SC2064
     trap "rm -rf '$workdir'" RETURN
 
-    # --- .SlackBuild: copy upstream's verbatim, bump VERSION/BUILD only ---
-    # Everything else - offline crate vendoring, arch handling, whatever a
-    # mass upstream rewrite changed - is preserved exactly, since it's not
-    # ours to maintain independently of upstream.
+    # Upstream's SlackBuild verbatim apart from VERSION and BUILD.
     sed -E \
         -e "s/^(VERSION=\\\$\\{VERSION:-)[^}]*(\\})/\\1${version}\\2/" \
         -e 's/^(BUILD=\$\{BUILD:-)[^}]*(\})/\11\2/' \
         "$src_pkg_dir/${PRGNAM}.SlackBuild" > "$out_dir/${PRGNAM}.SlackBuild"
 
     if ! grep -qF "VERSION=\${VERSION:-${version}}" "$out_dir/${PRGNAM}.SlackBuild"; then
-        die "$PRGNAM: couldn't find/rewrite the VERSION=\${VERSION:-...} line in ${PRGNAM}.SlackBuild - upstream format changed, needs a look"
+        die "$PRGNAM: couldn't rewrite the VERSION=\${VERSION:-...} line in ${PRGNAM}.SlackBuild"
     fi
 
-    # --- .info -------------------------------------------------------------
-    # DOWNLOAD_URL is the only one of these needed by every STRATEGY - it's what
-    # ends up in the generated .info's own DOWNLOAD (or DOWNLOAD_x86_64)
-    # field. ARCHIVE/PRGDIR are rust-only (rust-info.sh needs them to lay
-    # out the vendored crate tree, and derives both on its own); the
-    # tarball path below just downloads to a throwaway temp filename to
-    # compute an MD5, so it never needs them at all.
-    #
-    # X86_64_ONLY is independent of STRATEGY - it's an arch-support fact
-    # about the package, orthogonal to which generator builds its .info
-    # (a package can be x86_64-only with either a plain tarball or a
-    # vendored-crate build).
-    local url
+    local url homepage requires maintainer email
     url="$(subst_version "$DOWNLOAD_URL" "$version")"
+    homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
+    requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
+    maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
+    email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
 
     case "$STRATEGY" in
         tarball)
-            local homepage requires maintainer email archive_path md5
-            homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
-            requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
-            maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
-            email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
-
-            archive_path="$workdir/source-archive"
+            local md5 download_lines
             log "downloading $url"
-            wget -q -O "$archive_path" "$url" || die "$PRGNAM: failed to download $url"
-            md5="$(md5_of "$archive_path")"
+            wget -q -O "$workdir/source-archive" "$url" || die "$PRGNAM: failed to download $url"
+            md5="$(md5sum "$workdir/source-archive" | cut -d' ' -f1)"
 
-            local download_lines
-            if [ "${X86_64_ONLY:-0}" = 1 ]; then
+            if [ "$X86_64_ONLY" = 1 ]; then
                 download_lines="DOWNLOAD=\"UNSUPPORTED\"
-MD5SUM=\"UNSUPPORTED\"
+MD5SUM=\"\"
 DOWNLOAD_x86_64=\"$url\"
 MD5SUM_x86_64=\"$md5\""
             else
@@ -470,23 +314,14 @@ EOF
             ;;
 
         rust)
-            local homepage requires maintainer email
-            homepage="$(info_get "$src_pkg_dir/${PRGNAM}.info" HOMEPAGE)"
-            requires="$(info_get "$src_pkg_dir/${PRGNAM}.info" REQUIRES)"
-            maintainer="$(info_get "$src_pkg_dir/${PRGNAM}.info" MAINTAINER)"
-            email="$(info_get "$src_pkg_dir/${PRGNAM}.info" EMAIL)"
-
-            # rust-info.sh derives the tarball's local filename and its
-            # extracted directory on its own (from $URL and the tarball's
-            # own manifest) - nothing here needs to know either.
             (
                 cd "$workdir"
                 PRGNAM="$PRGNAM" VERSION="$version" HOMEPAGE="$homepage" REQUIRES="$requires" \
                     MAINTAINER="$maintainer" EMAIL="$email" \
-                    URL="$url" X86_64_ONLY="${X86_64_ONLY:-0}" \
-                    bash "$REPO_ROOT/scripts/rust-info.sh"
+                    URL="$url" X86_64_ONLY="$X86_64_ONLY" \
+                    bash "$SCRIPT_DIR/rust-info.sh"
             )
-            [ -f "$workdir/${PRGNAM}.info" ] || die "$PRGNAM: rust-info generator did not produce ${PRGNAM}.info"
+            [ -f "$workdir/${PRGNAM}.info" ] || die "$PRGNAM: rust-info.sh did not produce ${PRGNAM}.info"
             cp "$workdir/${PRGNAM}.info" "$out_dir/${PRGNAM}.info"
             ;;
 
@@ -498,43 +333,19 @@ EOF
     log "generated $out_dir/${PRGNAM}.info and $out_dir/${PRGNAM}.SlackBuild"
 }
 
-# --- PR body rendering -----------------------------------------------------
-# Used by open-update-prs.yml, once per package - same reasoning as
-# generate_package for why it's a plain function.
-#
-# Packages live at <category>/<prgnam>/ in this repo - the exact same path
-# they occupy in SlackBuildsOrg/slackbuilds - so the PR's own "Files
-# changed" tab already *is* the real diff (full GitHub review UI: inline
-# comments, viewed checkboxes, etc.), not something that needs restating
-# here. This just states what merging it will do.
-#
 # Usage: render_pr_body <prgnam> <version>
 render_pr_body() {
     local prgnam="${1:?prgnam required}" version="${2:?version required}"
-
-    local conf="packages/${prgnam}.conf"
-    load_package_conf "$conf"
-    [ "$prgnam" = "$PRGNAM" ] || die "packages/${prgnam}.conf declares PRGNAM=$PRGNAM"
-
-    local commit_msg="${CATEGORY}/${PRGNAM}: Updated for version ${version}"
+    load_package_conf "$PACKAGES_DIR/${prgnam}.conf"
 
     cat <<EOF
 Detected upstream update: **${CATEGORY}/${PRGNAM} → ${version}**.
 
-The diff below (**Files changed** tab) is exactly what merging this PR
-submits to
+Merging submits **Files changed** to
 [SlackBuildsOrg/slackbuilds](https://github.com/SlackBuildsOrg/slackbuilds)
-as \`${SBO_FORK:-perrin4869/sbo}:${PRGNAM}/${version}\` - modulo one thing:
-\`submit.yml\` re-derives it against a fresh upstream clone at merge time
-rather than trusting what's reviewed here, in case upstream moved since
-this PR was opened. If that happens it'll say so on the resulting upstream
-PR.
-
-> **${commit_msg}**
+from \`${SBO_FORK}:${PRGNAM}/${version}\`, as
+\`${CATEGORY}/${PRGNAM}: Updated for version ${version}\`.
+\`submit.yml\` regenerates against a fresh upstream clone at merge time,
+and notes it on the upstream PR if the result differs.
 EOF
 }
-
-# --- misc -------------------------------------------------------------
-
-# md5sum of a local file, first field only.
-md5_of() { md5sum "$1" | cut -d' ' -f1; }

@@ -1,10 +1,5 @@
 FROM slackbuilds:15.0
 
-# google-go-lang has REQUIRES="" (no further deps) - plain single-package
-# install, no queue/dependency handling needed. Baking this in means
-# check.yml never has to build it itself: /etc/profile.d/go.sh (setting
-# GOROOT/PATH) only gets read at shell startup, so a package built
-# *within the same running shell* right after installing this never
-# sees that setup at all. Baked into the image, that shell starts fresh
-# with it already in place.
+# Preinstalled because its /etc/profile.d/go.sh only takes effect in a new
+# login shell, so installing it in the same shell as the build doesn't work.
 RUN sbopkg -B -e stop -i google-go-lang

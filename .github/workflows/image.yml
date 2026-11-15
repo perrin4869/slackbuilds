@@ -8,8 +8,7 @@ on:
       - 'Dockerfile'
       - 'Dockerfile.*'
   schedule:
-    # Picks up Slackware package/security updates even when the Dockerfile
-    # itself hasn't changed.
+    # Picks up Slackware package updates.
     - cron: '5 5 1 * *'
   workflow_dispatch: {}
 
@@ -34,13 +33,7 @@ jobs:
         with:
           preinstalled-runtimes: true
 
-      # /mnt alone has ample headroom for this image (measured ~66 GB free
-      # vs. ~14.6 GB image size) - no need for a maintained action's more
-      # involved LVM volume-combining (and unlike free-disk-space above,
-      # that kind of action mounts a fresh filesystem straight over the
-      # target path with no stop/sync handling, which isn't safe to point
-      # at a live /var/lib/docker while dockerd is still running against
-      # the old one).
+      # The root disk is too small for the ~15 GB image; /mnt has ~66 GB.
       - name: Point Docker at /mnt
         run: |
           sudo systemctl stop docker
@@ -59,12 +52,8 @@ jobs:
         id: date
         run: echo "tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
-      # driver: docker (the daemon's built-in builder, not a separate
-      # docker-container builder) shares this runner's local image store,
-      # so the two derived builds below can FROM the base build's tag
-      # directly - no push-to-GHCR-then-pull-back round trip for a 14.6GB
-      # image. We don't need docker-container's other features here
-      # (multi-platform, GHA cache export).
+      # driver: docker shares the local image store, so the derived builds
+      # can FROM the base image without pulling it back from GHCR.
       - uses: docker/setup-buildx-action@v4
         with:
           driver: docker
@@ -79,19 +68,11 @@ jobs:
             ghcr.io/perrin4869/slackbuilds:15.0
             ghcr.io/perrin4869/slackbuilds:15.0-${{ steps.date.outputs.tag }}
 
-      # A bare tag (no registry/namespace) would otherwise get pushed as
-      # docker.io/library/slackbuilds:15.0 by the step above - Docker's
-      # default normalization for an unqualified name - which fails
-      # (unauthorized, no Docker Hub login here). Tag it locally instead,
-      # after the real push, purely so Dockerfile.* below can FROM it
-      # without a registry pull.
+      # Local-only tag for Dockerfile.*'s FROM. Listing it in tags: above
+      # would try to push it to docker.io.
       - name: Tag slackbuilds:15.0 locally
         run: docker tag ghcr.io/perrin4869/slackbuilds:15.0 slackbuilds:15.0
 
-      # FROMs the bare local tag slackbuilds:15.0 (see Dockerfile.*),
-      # resolved straight out of this runner's image store thanks to
-      # driver: docker above - not the ghcr.io tag pushed by the step
-      # before this one.
       - name: Build + push slackbuilds-google-go-lang:15.0
         uses: docker/build-push-action@v7
         with:

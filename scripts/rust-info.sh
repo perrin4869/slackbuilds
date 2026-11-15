@@ -44,10 +44,6 @@ URL=${URL:-}
 WEBADDR="https://static.crates.io/crates/"
 # WEBADDR="https://crates-io.s3-us-west-1.amazonaws.com/crates/"
 
-# X86_64_ONLY=1 writes crate info under DOWNLOAD_x86_64/MD5SUM_x86_64
-# instead of DOWNLOAD/MD5SUM - chosen once here and used consistently below,
-# including for the indirect ${!download_field} expansion that fetches the
-# crates themselves.
 if [ "$X86_64_ONLY" = 1 ]; then
   download_field=DOWNLOAD_x86_64
   md5_field=MD5SUM_x86_64
@@ -59,12 +55,7 @@ fi
 rm -rf DEBUG CRATES
 
 wget $URL || exit
-# archive/prgdir aren't caller config - both are derivable from what's
-# actually there: archive is just whatever wget saved the URL under (its
-# basename, since no -O was given above), and prgdir is the tarball's own
-# top-level directory, read from its own manifest rather than guessed
-# from $PRGNAM-$VERSION (wrong whenever the upstream repo's name doesn't
-# match PRGNAM, e.g. jujutsu's repo is "jj").
+# prgdir from the tarball itself: the repo name can differ from PRGNAM (jj).
 archive="$(basename "$URL")"
 tar xf "$archive" || exit
 prgdir="$(tar tf "$archive" | head -1 | cut -d/ -f1)"
@@ -144,16 +135,13 @@ while read -r crate; do
 done < depsgood
 sed -i '$ s| \\|"|' MD5SUMS
 
-# Two full heredocs rather than one with conditional field lines - field
-# order differs (the UNSUPPORTED pair leads here, trails in the other
-# case), so this stays a literal, readable template either way.
 if [ "$X86_64_ONLY" = 1 ]; then
   cat << EOF > $PRGNAM.info
 PRGNAM="$PRGNAM"
 VERSION="$VERSION"
 HOMEPAGE="$HOMEPAGE"
 DOWNLOAD="UNSUPPORTED"
-MD5SUM="UNSUPPORTED"
+MD5SUM=""
 $(cat DOWNLOADS MD5SUMS)
 REQUIRES="$REQUIRES"
 MAINTAINER="$MAINTAINER"

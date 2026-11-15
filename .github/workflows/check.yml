@@ -5,7 +5,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - 'sbo/**/*.info'
+      - 'sbo/**'
 
 concurrency:
   group: check-${{ github.event.pull_request.number }}
@@ -29,13 +29,10 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only \
-              "origin/$BASE_REF" HEAD \
-              -- 'sbo/*/*/*.info' \
-            | xargs -r -n1 dirname | sort -u)"
-
-          json="$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')"
-          echo "packages=$json" >> "$GITHUB_OUTPUT"
+          changed="$(git diff --name-only --diff-filter=d "origin/$BASE_REF" HEAD -- 'sbo/*/*/*' \
+            | cut -d/ -f1-3 | sort -u)"
+          echo "packages=$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')" \
+            >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.package }}
@@ -53,33 +50,20 @@ jobs:
       - name: Derive category/prgnam from path
         id: meta
         env:
-          # Passed via env, not interpolated into the script body - this
-          # is a directory name out of a PR diff, not something to trust
-          # as inert text. See the security note in the repo README.
+          # Untrusted input: keep in env, see the Security section in README.
           MATRIX_PACKAGE: ${{ matrix.package }}
         run: |
           set -euo pipefail
           source scripts/lib.sh
-          category="$(dirname "$MATRIX_PACKAGE" | xargs basename)"
+          category="$(basename "$(dirname "$MATRIX_PACKAGE")")"
           prgnam="$(basename "$MATRIX_PACKAGE")"
           echo "category=$category" >> "$GITHUB_OUTPUT"
           echo "prgnam=$prgnam" >> "$GITHUB_OUTPUT"
 
-          # CHECK_IMAGE names a derived image with an expensive toolchain
-          # dependency (rust-opt, google-go-lang) pre-baked in - see
-          # image.yml and the field's own comment in lib.sh. Empty means
-          # the base image already has everything this package needs.
           load_package_conf "packages/${prgnam}.conf"
-          image="ghcr.io/perrin4869/slackbuilds${CHECK_IMAGE:+-$CHECK_IMAGE}:15.0"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/perrin4869/slackbuilds${CHECK_IMAGE:+-$CHECK_IMAGE}:15.0" >> "$GITHUB_OUTPUT"
 
-      # Fresh current master, not a pinned historical SHA - submit.yml
-      # re-derives against fresh upstream at merge time regardless (upstream
-      # is always the source of truth, see its own comment), so pinning
-      # here wouldn't guarantee the build check matches what's actually
-      # submitted anyway. Simpler to just check against current master both
-      # times.
-      - name: Clone upstream and overlay staged files
+      - name: Clone upstream and overlay changed files
         env:
           MATRIX_PACKAGE: ${{ matrix.package }}
           CATEGORY: ${{ steps.meta.outputs.category }}
@@ -88,13 +72,13 @@ jobs:
           set -euo pipefail
           git clone --quiet --depth 1 --branch master \
             https://github.com/SlackBuildsOrg/slackbuilds.git upstream-tree
-
-          pkg_dir="upstream-tree/${CATEGORY}/${PRGNAM}"
-          cp "${MATRIX_PACKAGE}/${PRGNAM}.info" "$pkg_dir/"
-          cp "${MATRIX_PACKAGE}/${PRGNAM}.SlackBuild" "$pkg_dir/"
+          cp "${MATRIX_PACKAGE}/${PRGNAM}.info" "${MATRIX_PACKAGE}/${PRGNAM}.SlackBuild" \
+            "upstream-tree/${CATEGORY}/${PRGNAM}/"
 
       - name: Pull build image
-        run: docker pull "${{ steps.meta.outputs.image }}"
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: docker pull "$IMAGE"
 
       - name: sbolint + build + sbopkglint
         env:
@@ -104,13 +88,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          # Mounted under the "local" repo slot (/etc/sbopkg/repos.d/50-local.repo),
-          # not "SBo/15.0" - that slot's CheckGPG=GPG verifies the downloaded
-          # source tarball against SBo's separate signed source-archive mirror,
-          # which a plain upstream git clone has no matching signature for.
-          # Under -e stop that "failure" is treated as a real build error and
-          # sbopkg deletes the source directory and stops - so every single
-          # build would fail. The "local" slot has no GPG checking at all.
+          # The "local" repo slot, not SBo/15.0: that one has CheckGPG=GPG,
+          # which fails for sources not on SBo's signed mirror.
           docker run --rm \
             -v "$PWD/upstream-tree:/var/lib/sbopkg/local/local" \
             -v sbo-cache:/var/cache/sbopkg \
@@ -123,22 +102,15 @@ jobs:
               cd /var/lib/sbopkg/local/local
               sbolint "${CATEGORY}/${PRGNAM}"
               sqg -p "${PRGNAM}"
-              # sqg only writes a queue file when REQUIRES is non-empty (a
-              # package with no dependencies has nothing to queue). When it
-              # DOES write one, sbopkg -i <name> finds both a queuefile and
-              # a package of that name and asks (interactively) which one
-              # is meant - which hangs forever here (no tty attached).
-              # Referencing the queuefile by its .sqf extension, per
-              # the sbopkg man page, is the documented disambiguation.
+              # With both a queue and a package named PRGNAM, sbopkg asks
+              # which one is meant and hangs without a tty; .sqf disambiguates.
+              # sqg only writes a queue when REQUIRES is non-empty.
               if [ -f "/var/lib/sbopkg/queues/${PRGNAM}.sqf" ]; then
                 BUILD_TARGET="${PRGNAM}.sqf"
               else
                 BUILD_TARGET="${PRGNAM}"
               fi
-              # -k: skip anything already installed - matters for the
-              # CHECK_IMAGE images, where the expensive dependency
-              # (rust-opt, google-go-lang) is already there and does not
-              # need rebuilding.
+              # -k skips the toolchain preinstalled in CHECK_IMAGE variants.
               sbopkg -B -e stop -k -i "$BUILD_TARGET"
               pkg="$(ls "/tmp/${PRGNAM}"-*.tgz | head -1)"
               sbopkglint "$pkg"

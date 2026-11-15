@@ -24,7 +24,7 @@ jobs:
   sync:
     name: Reconcile tracked projects with packages/*.conf
     runs-on: ubuntu-24.04
-    continue-on-error: true # advisory only - a transient API hiccup here blocks nothing
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 
@@ -42,11 +42,6 @@ jobs:
 
           API="https://api.newreleases.io/v1"
 
-          # DEBUG is only ever "true" on a manual workflow_dispatch with the
-          # box checked - empty (schedule/push triggers, or unchecked) means
-          # no request/response logging. Only the body is logged, never the
-          # X-Key header - not that it'd leak (GitHub masks the literal
-          # secret value in logs regardless), just no reason to print it.
           nr_api() {
             local method="$1" path="$2" body="${3:-}" response
             if [ "${DEBUG:-}" = "true" ]; then
@@ -69,21 +64,17 @@ jobs:
           log "fetching currently tracked projects"
           existing_json="$(nr_api GET /projects)"
 
-          # A subshell: load_package_conf can die() (a malformed .conf), and
-          # since this loop's job already runs continue-on-error at the
-          # workflow level, an unguarded die() here wouldn't just skip one
-          # package - it'd abort the whole loop while still reporting the
-          # job as fine, silently skipping every remaining package too.
+          # Subshell so a die() in one package doesn't end the loop.
           sync_one() (
             set -euo pipefail
             conf="$1"
             load_package_conf "$conf"
 
-            if [ "${FROZEN:-0}" = "1" ]; then
+            if [ "$FROZEN" = 1 ]; then
               log "$PRGNAM: frozen, not tracking on newreleases.io"
               exit 0
             fi
-            if [ "${POLL:-0}" = "1" ]; then
+            if [ "$POLL" = 1 ]; then
               log "$PRGNAM: POLL=1, no webhook option - not tracking on newreleases.io"
               exit 0
             fi
@@ -102,9 +93,6 @@ jobs:
               add_response="$(nr_api POST /projects "$(jq -n \
                   --arg name "$github_repo" --arg hook "$NEWRELEASES_WEBHOOK_ID" \
                   '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')")"
-              # Success responses return project fields at the top level
-              # (id/name/provider/...), never wrapped under a "project" key -
-              # verified against newreleases.io's own API docs.
               if ! jq -e '.id // empty' <<< "$add_response" >/dev/null; then
                 log "warn: $PRGNAM: add failed: $(printf '%s' "$add_response" | head -c 200)"
                 exit 1
@@ -127,13 +115,6 @@ jobs:
             fi
           )
 
-          # continue-on-error at the job level (above) keeps a real failure
-          # here from blocking anything else - but that's about not
-          # cascading, not about hiding it: a job with continue-on-error
-          # still shows its own failure in the Actions UI as long as the
-          # step itself actually exits nonzero, which is what this exists
-          # to guarantee - a genuine API failure (a real 400, not "already
-          # exists") must not be swallowed into a quietly-successful run.
           failed=""
           for conf in packages/*.conf; do
             [ -e "$conf" ] || continue
