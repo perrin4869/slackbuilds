@@ -338,6 +338,7 @@ EOF
 render_pr_body() {
     local prgnam="${1:?prgnam required}" version="${2:?version required}"
     load_package_conf "$PACKAGES_DIR/${prgnam}.conf"
+    [ "$prgnam" = "$PRGNAM" ] || die "$PACKAGES_DIR/${prgnam}.conf declares PRGNAM=$PRGNAM"
 
     cat <<EOF
 Detected upstream update: **${CATEGORY}/${PRGNAM} → ${version}**.

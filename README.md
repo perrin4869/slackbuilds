@@ -74,10 +74,10 @@ newreleases.io webhook payload template:
 
 ## Secrets
 
-| Secret | Used by | |
+| Secret | Used by | Purpose |
 |---|---|---|
 | `SBO_SUBMIT_TOKEN` | `submit.yml` | Classic PAT with `repo` and `workflow` scopes. A fine-grained PAT can't open PRs on a repo you don't own. `workflow` is needed to sync `perrin4869/sbo` and push to it once upstream has changed its workflow files. |
-| `SBO_UPDATE_PR_TOKEN` | `open-update-prs.yml` | Fine-grained PAT for this repo, Contents and Pull requests read/write. Workflows on PRs opened by `github-actions[bot]` need manual approval. |
+| `SBO_UPDATE_PR_TOKEN` | `open-update-prs.yml`, `image-deps.yml` | Fine-grained PAT for this repo, Contents and Pull requests read/write. Workflows on PRs opened by `github-actions[bot]` need manual approval. |
 | `NEWRELEASES_API_KEY` | `sync-newreleases.yml` | newreleases.io API key. |
 | `NEWRELEASES_WEBHOOK_ID` | `sync-newreleases.yml` | Id of the newreleases.io webhook pointing at `https://api.github.com/repos/perrin4869/slackbuilds/dispatches`, with `Authorization: Bearer <PAT>`, `Accept: application/vnd.github+json` and the payload template above. |
 
