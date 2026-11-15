@@ -47,7 +47,10 @@ jobs:
           if [ -n "$DISPATCH_PACKAGE" ]; then
             packages="$DISPATCH_PACKAGE"
           else
-            packages="$(grep -l '^POLL=1$' packages/*.conf | xargs -n1 basename | sed 's/\.conf$//')"
+            # || true: grep -l exits 1 when no package has POLL=1, which would
+            # otherwise fail the step under set -e - and -r keeps xargs from
+            # running basename with no input.
+            packages="$(grep -l '^POLL=1$' packages/*.conf | xargs -r -n1 basename | sed 's/\.conf$//' || true)"
           fi
 
           # || per package: check_one can die(), which would otherwise end the loop.

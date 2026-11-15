@@ -15,7 +15,7 @@ jobs:
     name: sbopkg
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@v7
@@ -50,13 +50,29 @@ jobs:
 
       - name: Open PR
         if: steps.bump.outputs.latest != ''
+        id: pr
         uses: peter-evans/create-pull-request@v8.1.3
         with:
+          # PAT so the PR isn't opened by github-actions[bot] (needs manual
+          # workflow approval) and so the Notify step can actually reach you.
+          token: ${{ secrets.SBO_UPDATE_PR_TOKEN }}
           title: "Dockerfile: bump sbopkg to ${{ steps.bump.outputs.latest }}"
           commit-message: "Dockerfile: bump sbopkg to ${{ steps.bump.outputs.latest }}"
           body: "sbopkg ${{ steps.bump.outputs.latest }} released (was ${{ steps.bump.outputs.current }}). Merging rebuilds the images."
           branch: image/sbopkg
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           add-paths: Dockerfile
+
+      - name: Notify
+        if: contains(fromJSON('["created", "updated"]'), steps.pr.outputs.pull-request-operation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          PR_OPERATION: ${{ steps.pr.outputs.pull-request-operation }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "@perrin4869 sbopkg update PR ${PR_OPERATION}."
 
   # Not pinned: the image installs whatever SBo has published (the 15.0
   # branch), so compare against that rather than the project's releases.

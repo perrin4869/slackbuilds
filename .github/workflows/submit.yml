@@ -32,7 +32,7 @@ jobs:
 
           # All-zero before = the branch was just created, so nothing here is
           # a version bump.
-          if [ "$BEFORE" = "$(printf '0%.0s' $(seq 40))" ]; then
+          if [ "$BEFORE" = "$(printf '%040d' 0)" ]; then
             changed=""
           else
             # Modified only: an added .info is a new baseline, not an update.
@@ -111,8 +111,6 @@ jobs:
           done
 
           cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$workdir/upstream/${CATEGORY}/${PRGNAM}/"
-          # Keep this repo's copy equal to what was submitted (next step commits it).
-          cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
 
           commit_msg="${CATEGORY}/${PRGNAM}: Updated for version ${version}"
           branch="${PRGNAM}/${version}"
@@ -157,9 +155,19 @@ jobs:
             log "opened $pr_url"
           fi
 
+          # Sync this repo's copy to what was actually submitted, and only
+          # after the push and PR both succeeded. Syncing earlier would let a
+          # push/PR failure leave the tracked version ahead of upstream with
+          # no PR, and the next poll would then see it as already handled and
+          # never retry it.
+          cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
+
           echo "result=SUBMITTED $PRGNAM $version $pr_url" >> "$GITHUB_OUTPUT"
 
       - name: Commit drift correction, if any
+        # Only after a successful submission: the sync to pkg_dir happens
+        # inside the submit step, and a failed submit must not be persisted.
+        if: startsWith(steps.submit.outputs.result, 'SUBMITTED')
         env:
           MATRIX_PACKAGE: ${{ matrix.package }}
           SUBMIT_RESULT: ${{ steps.submit.outputs.result }}
