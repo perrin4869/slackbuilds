@@ -1,0 +1,94 @@
+---
+name: Build image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.*'
+  schedule:
+    # Picks up Slackware package updates.
+    - cron: '5 5 1 * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build + push slackbuilds:15.0 and its two toolchain variants
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          preinstalled-runtimes: true
+
+      # The root disk is too small for the ~15 GB image; /mnt has ~66 GB.
+      - name: Point Docker at /mnt
+        run: |
+          sudo systemctl stop docker
+          sudo mkdir -p /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Date tag
+        id: date
+        run: echo "tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      # driver: docker shares the local image store, so the derived builds
+      # can FROM the base image without pulling it back from GHCR.
+      - uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker
+
+      - name: Build slackbuilds:15.0
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: true
+          tags: |
+            ghcr.io/perrin4869/slackbuilds:15.0
+            ghcr.io/perrin4869/slackbuilds:15.0-${{ steps.date.outputs.tag }}
+
+      # Local-only tag for Dockerfile.*'s FROM. Listing it in tags: above
+      # would try to push it to docker.io.
+      - name: Tag slackbuilds:15.0 locally
+        run: docker tag ghcr.io/perrin4869/slackbuilds:15.0 slackbuilds:15.0
+
+      - name: Build + push slackbuilds-google-go-lang:15.0
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.google-go-lang
+          push: true
+          tags: |
+            ghcr.io/perrin4869/slackbuilds-google-go-lang:15.0
+            ghcr.io/perrin4869/slackbuilds-google-go-lang:15.0-${{ steps.date.outputs.tag }}
+
+      - name: Build + push slackbuilds-rust-opt:15.0
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.rust-opt
+          push: true
+          tags: |
+            ghcr.io/perrin4869/slackbuilds-rust-opt:15.0
+            ghcr.io/perrin4869/slackbuilds-rust-opt:15.0-${{ steps.date.outputs.tag }}

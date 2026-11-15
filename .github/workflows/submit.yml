@@ -1,0 +1,194 @@
+---
+name: Submit upstream
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'sbo/**/*.info'
+
+# No concurrency group: GitHub cancels all but one pending run per group,
+# which would drop submissions when several merges land close together.
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    name: Discover merged packages
+    runs-on: ubuntu-26.04
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: list
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          # All-zero before = the branch was just created, so nothing here is
+          # a version bump.
+          if [ "$BEFORE" = "$(printf '%040d' 0)" ]; then
+            changed=""
+          else
+            # Modified only: an added .info is a new baseline, not an update.
+            # And VERSION must actually differ: the drift commit this workflow
+            # pushes itself touches the .info without changing the version,
+            # and would otherwise submit the same version twice.
+            changed=""
+            for f in $(git diff --name-only --diff-filter=M "$BEFORE" "$GITHUB_SHA" -- 'sbo/*/*/*.info'); do
+              [ "$(git show "$BEFORE:$f" | info_get /dev/stdin VERSION)" != \
+                "$(git show "$GITHUB_SHA:$f" | info_get /dev/stdin VERSION)" ] || continue
+              changed+="$(printf '%s' "$f" | cut -d/ -f1-3)"$'\n'
+            done
+            changed="$(printf '%s' "$changed" | sort -u)"
+          fi
+
+          echo "packages=$(printf '%s\n' "$changed" | jq -R -s -c '[splits("\n") | select(length > 0)]')" \
+            >> "$GITHUB_OUTPUT"
+
+  submit:
+    name: ${{ matrix.package }}
+    needs: discover
+    if: needs.discover.outputs.packages != '[]'
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Regenerates against fresh upstream instead of submitting the reviewed
+      # copy, since upstream may have changed the package since review.
+      - name: Submit to SlackBuildsOrg/slackbuilds
+        id: submit
+        env:
+          SBO_SUBMIT_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+          GH_TOKEN: ${{ secrets.SBO_SUBMIT_TOKEN }}
+          MATRIX_PACKAGE: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          prgnam="$(basename "$MATRIX_PACKAGE")"
+          pkg_dir="$MATRIX_PACKAGE"
+          version="$(info_get "$pkg_dir/${prgnam}.info" VERSION)"
+          [ -n "$version" ] || die "$prgnam: couldn't read VERSION from $pkg_dir/${prgnam}.info"
+          load_package_conf "packages/${prgnam}.conf"
+          upstream_repo="${UPSTREAM_OWNER}/${UPSTREAM_REPO}"
+
+          current="$(upstream_version "$CATEGORY" "$PRGNAM")"
+          if [ -n "$current" ] && ! version_gt "$version" "$current"; then
+            log "$PRGNAM: upstream already ships $current (>= $version), skipping"
+            echo "result=SKIPPED $PRGNAM already-shipped $current" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          git clone --quiet --depth 1 --branch "$UPSTREAM_REF" \
+            "https://github.com/${upstream_repo}.git" "$workdir/upstream"
+
+          # The push below is from a shallow clone, so its parent commit has
+          # to exist on the fork. Syncing after the clone guarantees the fork
+          # is at or ahead of it.
+          gh repo sync "$SBO_FORK" --branch "$UPSTREAM_REF"
+
+          fresh_dir="$workdir/fresh"
+          generate_package "$prgnam" "$version" "$workdir/upstream" "$fresh_dir"
+
+          drifted=false
+          for f in "${PRGNAM}.info" "${PRGNAM}.SlackBuild"; do
+            if ! cmp -s "$fresh_dir/$f" "$pkg_dir/$f"; then
+              drifted=true
+              log "warning: $f differs from the reviewed copy; submitting the fresh one"
+            fi
+          done
+
+          cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$workdir/upstream/${CATEGORY}/${PRGNAM}/"
+
+          commit_msg="${CATEGORY}/${PRGNAM}: Updated for version ${version}"
+          branch="${PRGNAM}/${version}"
+          fork_url="https://x-access-token:${SBO_SUBMIT_TOKEN}@github.com/${SBO_FORK}.git"
+          (
+            cd "$workdir/upstream"
+            git checkout --quiet -b "$branch"
+            git add "${CATEGORY}/${PRGNAM}"
+            git -c user.name="Julian Grinblat" -c user.email="julian@dotcore.co.il" \
+              commit --quiet -m "$commit_msg"
+            git remote add fork "$fork_url"
+            # Re-running this version overwrites the branch it pushed before.
+            # The lease needs an explicit expected value: this clone never
+            # fetches the fork, so git has no remote-tracking ref to compare
+            # against and rejects the push as stale info.
+            if remote_sha="$(git ls-remote fork "refs/heads/${branch}" | cut -f1)" && [ -n "$remote_sha" ]; then
+              git push --quiet --force-with-lease="refs/heads/${branch}:${remote_sha}" \
+                fork "HEAD:refs/heads/${branch}"
+            else
+              git push --quiet fork "HEAD:refs/heads/${branch}"
+            fi
+          )
+
+          pr_body="Version bump generated by perrin4869/slackbuilds."
+          if [ "$drifted" = true ]; then
+            pr_body+=$'\n\n'"**Note:** regenerated against ${upstream_repo}@${UPSTREAM_REF} at submit time and differs from the reviewed copy. Please double check."
+          fi
+
+          # Re-runs should reuse the open PR, not fail on "already exists".
+          # Open only: a closed PR for this branch must not block a new one.
+          pr_url="$(gh pr list --repo "$upstream_repo" --state open \
+            --head "${SBO_FORK%%/*}:${branch}" --json url -q '.[0].url // empty')"
+          if [ -n "$pr_url" ]; then
+            log "PR already open for $branch: $pr_url"
+          else
+            pr_url="$(gh pr create \
+              --repo "$upstream_repo" \
+              --base "$UPSTREAM_REF" \
+              --head "${SBO_FORK%%/*}:${branch}" \
+              --title "$commit_msg" \
+              --body "$pr_body")"
+            log "opened $pr_url"
+          fi
+
+          # Sync this repo's copy to what was actually submitted, and only
+          # after the push and PR both succeeded. Syncing earlier would let a
+          # push/PR failure leave the tracked version ahead of upstream with
+          # no PR, and the next poll would then see it as already handled and
+          # never retry it.
+          cp "$fresh_dir/${PRGNAM}.info" "$fresh_dir/${PRGNAM}.SlackBuild" "$pkg_dir/"
+
+          echo "result=SUBMITTED $PRGNAM $version $pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Commit drift correction, if any
+        # Only after a successful submission: the sync to pkg_dir happens
+        # inside the submit step, and a failed submit must not be persisted.
+        if: startsWith(steps.submit.outputs.result, 'SUBMITTED')
+        env:
+          MATRIX_PACKAGE: ${{ matrix.package }}
+          SUBMIT_RESULT: ${{ steps.submit.outputs.result }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "$MATRIX_PACKAGE"; then
+            echo "no drift"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$MATRIX_PACKAGE"
+          git commit -m "chore: sync $(basename "$MATRIX_PACKAGE") to what was submitted" -m "$SUBMIT_RESULT"
+
+          # Other matrix jobs may push in between, so rebase and retry.
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:master; then
+              break
+            fi
+            [ "$i" -lt 5 ] || { echo "::error::failed to push after 5 attempts"; exit 1; }
+            git fetch origin master
+            git rebase origin/master
+            sleep $((i * 5))
+          done

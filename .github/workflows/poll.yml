@@ -1,0 +1,84 @@
+---
+name: Poll for updates
+
+on:
+  schedule:
+    # POLL=1 packages live on hosts with no API to watch (hg.sr.ht, cgit).
+    - cron: '35 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to check (PRGNAM), any package. Empty checks every POLL=1 package.'
+        required: false
+
+concurrency:
+  group: poll
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  poll:
+    name: Poll for updates
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install nvchecker
+        run: python -m pip install nvchecker
+
+      - name: Detect
+        id: detect
+        env:
+          DISPATCH_PACKAGE: ${{ github.event.inputs.package }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          if [ -n "$DISPATCH_PACKAGE" ]; then
+            packages="$DISPATCH_PACKAGE"
+          else
+            # || true: grep -l exits 1 when no package has POLL=1, which would
+            # otherwise fail the step under set -e - and -r keeps xargs from
+            # running basename with no input.
+            packages="$(grep -l '^POLL=1$' packages/*.conf | xargs -r -n1 basename | sed 's/\.conf$//' || true)"
+          fi
+
+          # || per package: check_one can die(), which would otherwise end the loop.
+          result=""
+          for prgnam in $packages; do
+            conf="packages/$prgnam.conf"
+            if [ ! -f "$conf" ]; then
+              result+="UNRESOLVED $prgnam (no such package config: $conf)"$'\n'
+              continue
+            fi
+            line="$(check_one "$conf")" || line="UNRESOLVED $prgnam (check failed - see log)"
+            result+="$line"$'\n'
+          done
+
+          printf '%s' "$result" | results_summary 'Poll results' >> "$GITHUB_STEP_SUMMARY"
+          echo "matrix=$(printf '%s' "$result" | results_matrix)" >> "$GITHUB_OUTPUT"
+
+  open-update-prs:
+    needs: poll
+    if: needs.poll.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.poll.outputs.matrix) }}
+    uses: ./.github/workflows/open-update-prs.yml
+    with:
+      prgnam: ${{ matrix.prgnam }}
+      category: ${{ matrix.category }}
+      version: ${{ matrix.version }}
+    secrets:
+      SBO_UPDATE_PR_TOKEN: ${{ secrets.SBO_UPDATE_PR_TOKEN }}

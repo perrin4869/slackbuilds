@@ -1,0 +1,5 @@
+FROM slackbuilds:15.0
+
+# Preinstalled because its /etc/profile.d/go.sh only takes effect in a new
+# login shell, so installing it in the same shell as the build doesn't work.
+RUN sbopkg -B -e stop -i google-go-lang

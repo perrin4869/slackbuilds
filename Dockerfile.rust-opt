@@ -1,0 +1,4 @@
+FROM slackbuilds:15.0
+
+# Preinstalled so check.yml doesn't rebuild it for every rust package.
+RUN sbopkg -B -e stop -i rust-opt

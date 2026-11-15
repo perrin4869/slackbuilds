@@ -1,0 +1,126 @@
+---
+name: Sync newreleases.io tracked projects
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/*.conf'
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Log every newreleases.io request and response'
+        type: boolean
+        default: false
+
+concurrency:
+  group: sync-newreleases
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Reconcile tracked projects with packages/*.conf
+    runs-on: ubuntu-26.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sync
+        env:
+          NEWRELEASES_API_KEY: ${{ secrets.NEWRELEASES_API_KEY }}
+          NEWRELEASES_WEBHOOK_ID: ${{ secrets.NEWRELEASES_WEBHOOK_ID }}
+          DEBUG: ${{ github.event.inputs.debug }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          : "${NEWRELEASES_API_KEY:?NEWRELEASES_API_KEY not set}"
+          : "${NEWRELEASES_WEBHOOK_ID:?NEWRELEASES_WEBHOOK_ID not set}"
+
+          API="https://api.newreleases.io/v1"
+
+          nr_api() {
+            local method="$1" path="$2" body="${3:-}" response
+            if [ "${DEBUG:-}" = "true" ]; then
+              log "--> $method ${API}${path}"
+              [ -n "$body" ] && log "$body"
+            fi
+            if [ -n "$body" ]; then
+              response="$(curl -sS -X "$method" "${API}${path}" \
+                -H "X-Key: ${NEWRELEASES_API_KEY}" -H 'Content-Type: application/json' \
+                -d "$body")"
+            else
+              response="$(curl -sS -X "$method" "${API}${path}" -H "X-Key: ${NEWRELEASES_API_KEY}")"
+            fi
+            if [ "${DEBUG:-}" = "true" ]; then
+              log "<-- $response"
+            fi
+            printf '%s' "$response"
+          }
+
+          log "fetching currently tracked projects"
+          existing_json="$(nr_api GET /projects)"
+
+          # Subshell so a die() in one package doesn't end the loop.
+          sync_one() (
+            set -euo pipefail
+            conf="$1"
+            load_package_conf "$conf"
+
+            if [ "$FROZEN" = 1 ]; then
+              log "$PRGNAM: frozen, not tracking on newreleases.io"
+              exit 0
+            fi
+            if [ "$POLL" = 1 ]; then
+              log "$PRGNAM: POLL=1, no webhook option - not tracking on newreleases.io"
+              exit 0
+            fi
+            if [[ "$SOURCE" != https://github.com/* ]]; then
+              log "$PRGNAM: SOURCE=$SOURCE not supported by newreleases.io sync (only github.com currently)"
+              exit 0
+            fi
+
+            github_repo="$(repo_path_from_url "$SOURCE")"
+
+            existing="$(printf '%s' "$existing_json" \
+              | jq -r --arg name "$github_repo" '.projects[]? | select(.provider=="github" and .name==$name)')"
+
+            if [ -z "$existing" ]; then
+              log "$PRGNAM: adding $github_repo to newreleases.io"
+              add_response="$(nr_api POST /projects "$(jq -n \
+                  --arg name "$github_repo" --arg hook "$NEWRELEASES_WEBHOOK_ID" \
+                  '{provider: "github", name: $name, exclude_prereleases: true, webhooks: [$hook]}')")"
+              if ! jq -e '.id // empty' <<< "$add_response" >/dev/null; then
+                log "warn: $PRGNAM: add failed: $(printf '%s' "$add_response" | head -c 200)"
+                exit 1
+              fi
+              exit 0
+            fi
+
+            id="$(printf '%s' "$existing" | jq -r '.id')"
+            has_hook="$(printf '%s' "$existing" | jq -r --arg h "$NEWRELEASES_WEBHOOK_ID" '(.webhooks // []) | index($h) != null')"
+            if [ "$has_hook" != "true" ]; then
+              log "$PRGNAM: attaching webhook to existing project $github_repo"
+              hooks="$(printf '%s' "$existing" | jq -c --arg h "$NEWRELEASES_WEBHOOK_ID" '(.webhooks // []) + [$h]')"
+              attach_response="$(nr_api POST "/projects/${id}" "$(jq -n --argjson hooks "$hooks" '{webhooks: $hooks}')")"
+              if ! jq -e '.id // empty' <<< "$attach_response" >/dev/null; then
+                log "warn: $PRGNAM: attach failed: $(printf '%s' "$attach_response" | head -c 200)"
+                exit 1
+              fi
+            else
+              log "$PRGNAM: already tracked with webhook attached"
+            fi
+          )
+
+          failed=""
+          for conf in packages/*.conf; do
+            [ -e "$conf" ] || continue
+            sync_one "$conf" || { log "warn: $conf: sync failed - see log above"; failed+="$conf "; }
+          done
+
+          if [ -n "$failed" ]; then
+            die "sync failed for:$failed(see warnings above)"
+          fi

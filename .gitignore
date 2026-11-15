@@ -1,3 +1,7 @@
 *.tar.gz
 *.tgz
 *.crate
+
+# scripts/rust-info.sh output
+CRATES/
+DEBUG/

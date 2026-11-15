@@ -1,0 +1,89 @@
+---
+name: Release webhook
+
+on:
+  repository_dispatch:
+    types: [upstream-release]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to check (PRGNAM) - simulates a webhook firing for it'
+        required: true
+      version:
+        description: "Version to check - simulates the webhook payload's version field"
+        required: true
+
+# Per project: a single group would cancel pending runs for other projects.
+concurrency:
+  group: webhook-${{ github.event.client_payload.project || github.event.inputs.package }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  webhook:
+    name: React to release webhook
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check version
+        id: detect
+        env:
+          # Untrusted input: keep in env, see the Security section in README.
+          PROJECT: ${{ github.event.client_payload.project }}
+          WEBHOOK_VERSION: ${{ github.event.client_payload.version }}
+          DISPATCH_PACKAGE: ${{ github.event.inputs.package }}
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/lib.sh
+
+          if [ -n "$DISPATCH_PACKAGE" ]; then
+            package="$DISPATCH_PACKAGE"
+            version="$DISPATCH_VERSION"
+          elif [ -n "$PROJECT" ]; then
+            package="$(find_package_by_repo "$PROJECT")"
+            version="$WEBHOOK_VERSION"
+            if [ -z "$package" ]; then
+              # log, not ::warning::: an annotation would parse this untrusted
+              # value as workflow commands.
+              log "warn: no packages/*.conf has SOURCE for $PROJECT"
+            fi
+          else
+            echo "::error::no client_payload.project and no package input"
+            exit 1
+          fi
+
+          result=""
+          if [ -n "$package" ]; then
+            conf="packages/${package}.conf"
+            if [ ! -f "$conf" ]; then
+              result="UNRESOLVED $package (no such package config: $conf)"
+            else
+              result="$(check_known "$conf" "$version")" || result="UNRESOLVED $package (check failed - see log)"
+            fi
+          fi
+
+          printf '%s\n' "$result" | results_summary 'Release webhook' >> "$GITHUB_STEP_SUMMARY"
+          echo "matrix=$(printf '%s\n' "$result" | results_matrix)" >> "$GITHUB_OUTPUT"
+
+  open-update-prs:
+    needs: webhook
+    if: needs.webhook.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.webhook.outputs.matrix) }}
+    uses: ./.github/workflows/open-update-prs.yml
+    with:
+      prgnam: ${{ matrix.prgnam }}
+      category: ${{ matrix.category }}
+      version: ${{ matrix.version }}
+    secrets:
+      SBO_UPDATE_PR_TOKEN: ${{ secrets.SBO_UPDATE_PR_TOKEN }}
