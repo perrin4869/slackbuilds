@@ -17,7 +17,7 @@ permissions:
 jobs:
   discover:
     name: Discover changed packages
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       packages: ${{ steps.list.outputs.packages }}
     steps:

@@ -22,7 +22,7 @@ permissions:
 jobs:
   poll:
     name: Poll for updates
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       matrix: ${{ steps.detect.outputs.matrix }}
     steps:
