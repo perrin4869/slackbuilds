@@ -22,9 +22,10 @@ die() { log "error: $*"; exit 1; }
 # Reset first so one package's fields don't leak into the next.
 load_package_conf() {
     local conf="$1"
-    CATEGORY= PRGNAM= SOURCE= TAG_REGEX= POLL=0 NVCHECKER_URL= NVCHECKER_REGEX= \
-        STRATEGY=tarball DOWNLOAD_URL= X86_64_ONLY=0 FROZEN=0 FROZEN_REASON= \
-        CHECK_IMAGE=
+    # shellcheck disable=SC2034 # some fields are read by the caller (CHECK_IMAGE)
+    CATEGORY='' PRGNAM='' SOURCE='' TAG_REGEX='' POLL=0 NVCHECKER_URL='' NVCHECKER_REGEX='' \
+        STRATEGY=tarball DOWNLOAD_URL='' X86_64_ONLY=0 FROZEN=0 FROZEN_REASON='' \
+        CHECK_IMAGE=''
     # shellcheck disable=SC1090
     source "$conf"
     [ -n "$PRGNAM" ] || die "$conf: PRGNAM not set"

@@ -54,7 +54,7 @@ fi
 
 rm -rf DEBUG CRATES
 
-wget $URL || exit
+wget "$URL" || exit
 # prgdir from the tarball itself: the repo name can differ from PRGNAM (jj).
 archive="$(basename "$URL")"
 tar xf "$archive" || exit
@@ -99,9 +99,12 @@ sed -i 's|$|.crate|g' ignore
 sed -i 's|^| -e |g' ignore
 cat ignore | tr -d \\n > greparg
 
-# Use constructed grep argument to ignore
-if [ $(cat greparg | wc -c) -gt 0 ]; then
+# Use constructed grep argument to ignore. greparg holds several -e options,
+# so it must be word-split rather than quoted.
+if [ "$(cat greparg | wc -c)" -gt 0 ]; then
+  # shellcheck disable=SC2046
   grep -v $(cat greparg) depsgood > depsgood2
+  # shellcheck disable=SC2046
   grep -v $(cat greparg) DOWNLOADS > DOWNLOADS2
   mv depsgood2 depsgood
   mv DOWNLOADS2 DOWNLOADS
@@ -113,7 +116,7 @@ rm -f ignore*
 
 source ./DOWNLOADS
 mkdir -p CRATES
-cd CRATES
+cd CRATES || exit
 wget ${!download_field} || exit
 cd ..
 
@@ -126,7 +129,7 @@ while read -r crate; do
   [ $sha256 != $cksum ] && echo $crate has a bad sha256sum! && exit
 done < depsgood
 
-echo "$md5_field"='"'$(md5sum "$archive" | cut -d' ' -f-1) \\ > MD5SUMS
+echo "$md5_field"='"'"$(md5sum "$archive" | cut -d' ' -f-1)" \\ > MD5SUMS
 
 # Getting md5sums based on depsgood list (ensures the sums don't get mixed up)
 while read -r crate; do

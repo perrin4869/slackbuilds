@@ -51,7 +51,9 @@ jobs:
             package="$(find_package_by_repo "$PROJECT")"
             version="$WEBHOOK_VERSION"
             if [ -z "$package" ]; then
-              echo "::warning::no packages/*.conf has SOURCE for $PROJECT"
+              # log, not ::warning::: an annotation would parse this untrusted
+              # value as workflow commands.
+              log "warn: no packages/*.conf has SOURCE for $PROJECT"
             fi
           else
             echo "::error::no client_payload.project and no package input"
